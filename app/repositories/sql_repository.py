@@ -26,6 +26,7 @@ _ORDER_COLUMNS = {
     # SQLite 用: JSON 内の importance で並べ替え.
     # PostgreSQL 切替時は analysis["importance"].as_integer() に変える.
     "importance": func.json_extract(MessageRecordORM.analysis, "$.importance"),
+    "urgency": MessageRecordORM.urgency_score,
 }
 
 
@@ -64,6 +65,7 @@ def _to_record(orm: MessageRecordORM) -> MessageRecord:
         analysis=analysis,
         state=MessageState(orm.state),
         triage_score=orm.triage_score,
+        urgency_score=orm.urgency_score,
         is_archived=orm.is_archived,
         version=orm.version,
         created_at=_to_aware_utc(orm.created_at),
@@ -107,6 +109,7 @@ class SqlRepository:
                             analysis=analysis_json,
                             state=record.state.value,
                             triage_score=record.triage_score,
+                            urgency_score=record.urgency_score,
                             is_unread=record.email.is_unread,
                             received_at=received_at,
                             provider=record.email.provider,
@@ -121,6 +124,7 @@ class SqlRepository:
                     existing.email = email_json
                     existing.analysis = analysis_json
                     existing.triage_score = record.triage_score
+                    existing.urgency_score = record.urgency_score
                     existing.is_unread = record.email.is_unread
                     existing.received_at = received_at
                     existing.provider = record.email.provider

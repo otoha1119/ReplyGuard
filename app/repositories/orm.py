@@ -23,6 +23,9 @@ class MessageRecordORM(Base):
     analysis: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     state: Mapped[str] = mapped_column(String, nullable=False, default="unhandled")
     triage_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    urgency_score: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0.0, server_default="0.0"
+    )
     # 絞り込み・並べ替え用の非正規化列（email から複写）.
     is_unread: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     received_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

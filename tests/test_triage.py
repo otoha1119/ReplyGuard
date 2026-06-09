@@ -2,7 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 
-from app.domain.triage import compute_triage_score
+from app.domain.triage import compute_triage_score, compute_urgency_score
 from app.models import AnalysisResult
 
 from tests.conftest import make_email
@@ -80,3 +80,52 @@ def test_deterministic_repeatable():
     email = make_email(received_at=NOW - timedelta(days=3))
     a = _analysis(2)
     assert compute_triage_score(email, a, NOW) == compute_triage_score(email, a, NOW)
+
+
+# --- compute_urgency_score ---
+
+def _analysis_with_deadline(deadline: datetime | None) -> AnalysisResult:
+    return AnalysisResult(importance=3, deadline=deadline)
+
+
+def test_urgency_no_analysis_returns_zero():
+    assert compute_urgency_score(None, NOW) == 0.0
+
+
+def test_urgency_no_deadline_returns_zero():
+    assert compute_urgency_score(_analysis_with_deadline(None), NOW) == 0.0
+
+
+def test_urgency_overdue_returns_max():
+    past = NOW - timedelta(days=1)
+    assert compute_urgency_score(_analysis_with_deadline(past), NOW) == 5.0
+
+
+def test_urgency_beyond_window_returns_floor():
+    far_future = NOW + timedelta(days=31)
+    assert compute_urgency_score(_analysis_with_deadline(far_future), NOW) == 0.5
+
+
+def test_urgency_at_window_boundary_returns_floor():
+    at_window = NOW + timedelta(days=30)
+    assert compute_urgency_score(_analysis_with_deadline(at_window), NOW) == 0.5
+
+
+def test_urgency_today_deadline_near_max():
+    today = NOW + timedelta(hours=1)
+    score = compute_urgency_score(_analysis_with_deadline(today), NOW)
+    assert 4.4 < score <= 4.5
+
+
+def test_urgency_decreases_as_deadline_recedes():
+    s1 = compute_urgency_score(_analysis_with_deadline(NOW + timedelta(days=1)), NOW)
+    s2 = compute_urgency_score(_analysis_with_deadline(NOW + timedelta(days=7)), NOW)
+    s3 = compute_urgency_score(_analysis_with_deadline(NOW + timedelta(days=14)), NOW)
+    assert s1 > s2 > s3
+
+
+def test_urgency_overdue_beats_imminent():
+    overdue = NOW - timedelta(days=1)
+    imminent = NOW + timedelta(hours=1)
+    assert compute_urgency_score(_analysis_with_deadline(overdue), NOW) > \
+           compute_urgency_score(_analysis_with_deadline(imminent), NOW)

@@ -1,9 +1,10 @@
-"""トリアージ採点（未対応検知スコア）.
+"""トリアージ採点（未対応検知スコア）と緊急度採点（期限ベース）.
 
-決定的な純粋関数. メール1通の「放置リスク」を 1 つの float に圧縮する.
-ダッシュボードはこのスコア降順で「対応漏れ」を上位に出す.
+決定的な純粋関数. メール1通の「放置リスク」と「期限緊急度」を独立した
+float に圧縮する. 2 つのスコアを独立させることで, ダッシュボードは
+「放置リスク順」「期限の近い順」のどちらでもソートできる.
 
-採点式:
+triage_score 採点式:
     score = unread_factor * importance * age_factor
 
 - unread_factor: 未読=1.0, 既読=0.3（未読を優先）
@@ -11,7 +12,13 @@
 - age_factor   : 経過日数で単調増加. 1 + min(days, 14)/14 * K
                  （受信直後=1.0, 14 日以上経過=1+K で頭打ち）
 
-すべて 0 以上の float. received_at 不明時は経過 0 日（age_factor=1.0）扱い.
+urgency_score 採点式:
+    deadline なし → 0.0
+    期限超過      → 5.0
+    0〜30日以内   → 4.5→0.5 に線形減衰
+    30日超        → 0.5（将来の期限として記録のみ）
+
+すべて 0 以上の float. received_at / deadline 不明時は 0 扱い.
 """
 
 from datetime import datetime, timezone
@@ -23,6 +30,7 @@ _READ_FACTOR = 0.3
 _DEFAULT_IMPORTANCE = 2
 _AGE_CAP_DAYS = 14.0
 _AGE_GAIN = 1.0  # K: 経過頭打ち時の加算上限
+_URGENCY_WINDOW_DAYS = 30.0  # この期間内に期限が迫ると urgency が上がる
 
 
 def _age_days(received_at: datetime | None, now: datetime) -> float:
@@ -46,3 +54,25 @@ def compute_triage_score(
     days = _age_days(email.received_at, now)
     age_factor = 1.0 + min(days, _AGE_CAP_DAYS) / _AGE_CAP_DAYS * _AGE_GAIN
     return unread_factor * importance * age_factor
+
+
+def compute_urgency_score(analysis: AnalysisResult | None, now: datetime) -> float:
+    """期限ベースの緊急度スコアを返す（0.0〜5.0）.
+
+    deadline なし → 0.0（緊急判定不可）
+    期限超過      → 5.0
+    0〜30日以内   → 4.5→0.5 に線形減衰
+    30日超        → 0.5（将来の予定として記録のみ）
+    """
+    if analysis is None or analysis.deadline is None:
+        return 0.0
+    deadline = analysis.deadline
+    if deadline.tzinfo is None:
+        deadline = deadline.replace(tzinfo=timezone.utc)
+    ref = now if now.tzinfo is not None else now.replace(tzinfo=timezone.utc)
+    days_remaining = (deadline - ref).total_seconds() / 86400.0
+    if days_remaining < 0.0:
+        return 5.0
+    if days_remaining >= _URGENCY_WINDOW_DAYS:
+        return 0.5
+    return 0.5 + 4.0 * (1.0 - days_remaining / _URGENCY_WINDOW_DAYS)

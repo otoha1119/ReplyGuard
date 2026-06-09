@@ -9,7 +9,7 @@ import logging
 from datetime import datetime, timezone
 
 from app.config import Settings
-from app.domain.triage import compute_triage_score
+from app.domain.triage import compute_triage_score, compute_urgency_score
 from app.models import MessageRecord
 from app.ports import Analyzer, MessageSource, Notifier, Repository
 
@@ -51,6 +51,7 @@ class IngestionService:
             try:
                 analysis = self._analyzer.analyze(email)
                 score = compute_triage_score(email, analysis, now)
+                urgency = compute_urgency_score(analysis, now)
                 # 新規判定は upsert 前に確認する（state はリポジトリ側が既存保持）.
                 existing = self._repo.get(message_id)
                 record = MessageRecord(
@@ -58,6 +59,7 @@ class IngestionService:
                     email=email,
                     analysis=analysis,
                     triage_score=score,
+                    urgency_score=urgency,
                 )
                 records.append(record)
                 is_new_by_id[message_id] = existing is None
