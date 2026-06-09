@@ -72,6 +72,7 @@ CLAUDE.md
 DESIGN.md
 OVERVIEW.md
 AGENTS.md
+secrets/
 
 # === Python ===
 __pycache__/

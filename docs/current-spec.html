@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ReplyGuard — いまの仕様（やさしい説明版）</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+      line-height: 1.9; color: #1f2937; background: #f5f7fb; padding: 0 16px;
+    }
+    .wrap { max-width: 820px; margin: 0 auto; padding: 40px 0 80px; }
+    h1 { font-size: 26px; color: #1e3a8a; margin-bottom: 6px; }
+    .sub { color: #6b7280; font-size: 14px; margin-bottom: 28px; }
+    h2 {
+      font-size: 19px; color: #1e40af; margin: 36px 0 12px;
+      padding-left: 10px; border-left: 4px solid #3b82f6;
+    }
+    p { margin: 10px 0; }
+    ul { margin: 8px 0 8px 22px; }
+    li { margin: 5px 0; }
+    .card {
+      background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+      padding: 16px 20px; margin: 14px 0;
+    }
+    .note {
+      background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px;
+      padding: 12px 16px; margin: 14px 0; font-size: 14px; color: #1e40af;
+    }
+    .flow { font-size: 15px; color: #374151; background:#fff; border:1px solid #e5e7eb;
+      border-radius:10px; padding:14px 18px; }
+    .flow b { color:#1e40af; }
+    .muted { color: #6b7280; }
+    strong { color: #111827; }
+    .tag { display:inline-block; background:#dbeafe; color:#1e40af; border-radius:6px;
+      padding:1px 8px; font-size:13px; margin-right:4px; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>ReplyGuard — いまの仕様（やさしい説明版）</h1>
+  <div class="sub">現状：PoC（試作）段階／2026-06-09 時点。むずかしい用語をなるべく避けた全体説明です。</div>
+
+  <h2>これは何をするもの？</h2>
+  <p>メールを自動で取り込み、<strong>「これは大事？」「返信が要る？」「対応にどれくらい手間がかかる？」</strong>をシステムが判定して、<strong>大事な順に一覧で見せてくれる</strong>ツールです。対応が済んでいないメールを見落とさない（対応漏れを防ぐ）ことが目的です。</p>
+  <p class="muted">いまは Gmail だけに対応しています。将来は Slack や Outlook なども統合する構想ですが、それらはまだ作っていません。</p>
+
+  <h2>ぜんたいの流れ</h2>
+  <div class="flow">
+    <b>① メールを取り込む</b> → <b>② 内容を判定する</b> → <b>③ 大事な順に並べる</b> → <b>④ 保存する</b> → <b>⑤ 必要なら通知する</b> → <b>⑥ 画面に一覧表示</b>
+  </div>
+  <p>この一連を、手動ボタンでも、一定間隔の自動実行でも動かせます。</p>
+
+  <h2>① メールの取り込み</h2>
+  <p>あなたの Gmail から最近のメールを読み込みます。読み込みは<strong>「見るだけ」</strong>で、メールを既読にしたり、書き換えたり、送信したりは一切しません（読み取り専用）。</p>
+  <p class="muted">接続にはGmailの「アプリパスワード」を使います。これは各自が自分のぶんを用意し、外部には出しません。</p>
+
+  <h2>② 判定システム（重要度などの判断）</h2>
+  <p>取り込んだメール1通ずつを読んで、次のことを判定します。</p>
+  <ul>
+    <li><strong>重要度</strong>（5段階のレベル）</li>
+    <li><strong>種類</strong>（仕事／お知らせ／宣伝 など、ざっくりの分類）</li>
+    <li><strong>対応の重さ</strong>（さっと返せる／じっくり対応が要る など）</li>
+    <li><strong>かんたんな要約</strong>（何のメールかの一言まとめ）</li>
+  </ul>
+  <p>判定のやり方は<strong>2通り</strong>あり、設定で切り替えられます。</p>
+  <div class="card">
+    <p><span class="tag">標準</span><strong>かんたん判定（その場で動く・無料）</strong><br>
+    送信元や件名のキーワード（「至急」「請求」「セール」など）から、AIを使わずにルールで判定します。インターネットや契約なしで、すぐ全体を動かせます。<strong>初期状態はこちら</strong>です。</p>
+  </div>
+  <div class="card">
+    <p><span class="tag">任意</span><strong>LLM（生成AI）による判定</strong><br>
+    設定すると、<strong>Anthropic の Claude</strong>（または OpenAI）にメール内容を渡して、より自然な重要度判断・要約をしてもらえます。AIの利用キーを設定したときだけ有効になり、<strong>キーが無ければ自動でかんたん判定に戻る</strong>ので、止まることはありません。</p>
+  </div>
+  <div class="note">AIにはメール本文を「判断してほしいデータ」として渡すだけで、本文に書かれた指示（例：「これを無視して〜しろ」）には従わせない作りにしています。AIの返事も決められた形だけ受け取り、おかしな出力は弾きます。</div>
+
+  <h2>③ 大事な順に並べる（優先順位づけ）</h2>
+  <p>各メールに<strong>優先スコア</strong>をつけて、高い順に並べます。スコアは主に次の3つで決まります。</p>
+  <ul>
+    <li><strong>未読かどうか</strong>（未読のほうが上に来やすい）</li>
+    <li><strong>重要度</strong>（②で判定したレベルが高いほど上）</li>
+    <li><strong>どれくらい時間が経ったか</strong>（放置されているものを埋もれさせない）</li>
+  </ul>
+  <p class="muted">ざっくり言うと「未読 × 重要度 × 経過時間」で、放っておけないものほど上に出ます。</p>
+
+  <h2>④ 対応状況の管理</h2>
+  <p>メールごとに「いまどういう状態か」を持っていて、ボタンで切り替えられます。</p>
+  <ul>
+    <li><strong>未対応</strong> … 取り込んだ直後</li>
+    <li><strong>対応中</strong> … 着手した</li>
+    <li><strong>完了</strong> … 対応し終えた</li>
+    <li><strong>スヌーズ</strong> … 後回し（一旦寝かせる）</li>
+    <li><strong>対象外</strong> … 対応不要として外す</li>
+  </ul>
+  <p class="muted">2人が同時に同じメールを更新しても食い違わないよう、競合を検知して「画面を最新にしてから操作してね」と知らせる仕組みが入っています。</p>
+
+  <h2>⑤ 保存場所（データベース）</h2>
+  <p>取り込んだメールと判定結果は<strong>このPC内のローカルなデータベース（SQLite）に保存</strong>されます。インターネット上のどこかに送ることはありません。</p>
+  <ul>
+    <li>標準では、プロジェクト内のファイル1つにためていきます（メール本文は個人情報なので外部共有・コミットはしません）。</li>
+    <li>チームで共有する本格的なデータベース（PostgreSQL）に切り替えることもできます（任意）。</li>
+    <li>同じメールを何度取り込んでも<strong>対応状況は引き継がれます</strong>（「対応中」が勝手に「未対応」に戻ったりしません）。</li>
+  </ul>
+
+  <h2>⑥ 通知システム</h2>
+  <p>大事なメール（重要度が高いもの）や新しく届いたものについて、お知らせを出せます。届け先は<strong>3通り</strong>から選べます。</p>
+  <div class="card">
+    <p><span class="tag">標準</span><strong>ログに記録（どこにも送らない）</strong><br>
+    アプリの動作記録に「重要なメールが来た」と要点だけ残します。本文の全文は出しません。外部に何も送らないので、初期状態はこれです。</p>
+  </div>
+  <div class="card">
+    <p><span class="tag">任意</span><strong>メールで通知</strong><br>
+    設定したメールアドレス宛に、お知らせメールを送ります（メール送信の設定が必要）。</p>
+  </div>
+  <div class="card">
+    <p><span class="tag">任意</span><strong>Slackで通知</strong><br>
+    指定した Slack のチャンネルにメッセージを投げます（Slack側の受け口URLが必要）。</p>
+  </div>
+  <p class="muted">設定が足りないときは自動で「ログに記録」に戻ります。また、同じメールを短時間に何度も通知しないように重複を抑えています。</p>
+
+  <h2>画面（ダッシュボード）</h2>
+  <p>ブラウザで開くと、メールが<strong>大事な順のカード一覧</strong>で並びます。各カードに差出人・件名・重要度・要約・状態が出て、ボタンで状態を変えられます。「更新」ボタンで最新のメールを取り込み直せます。</p>
+
+  <h2>自動で動く部分</h2>
+  <p>起動時に1回メールを取り込み、その後も<strong>一定間隔で自動的に取り込み</strong>を続けます（間隔は設定可能）。手動の「更新」ボタンでもいつでも取り込めます。</p>
+
+  <h2>ログイン（認証）</h2>
+  <p>いまは<strong>初期状態でログイン不要</strong>（自分のPCで試す前提）です。必要になれば、合言葉（トークン）でのログインを有効にできます。</p>
+
+  <h2>安全面でのこだわり</h2>
+  <ul>
+    <li>メールは<strong>見るだけ</strong>（既読化・送信・削除はしない）。</li>
+    <li>パスワードやAIキーなどの秘密情報は<strong>ファイルに直書きせず、共有もしない</strong>（各自のローカルだけ）。</li>
+    <li>PC内の情報やメール本文を<strong>外部に勝手に送らない</strong>（AI判定を使うときの正規のやり取りを除く）。</li>
+    <li>画面に出す相手（許可した接続元）を限定し、知らないサイトから中身を読まれないようにしています。</li>
+  </ul>
+
+  <h2>いまできること / まだできないこと</h2>
+  <div class="card">
+    <p><strong>できる</strong>：Gmailの取り込み、重要度などの判定（かんたん判定／AI判定）、大事な順の並び替え、対応状況の管理、ローカル保存、通知（ログ／メール／Slack）、ブラウザ一覧表示、自動取り込み。</p>
+  </div>
+  <div class="card">
+    <p><strong>まだ</strong>：Slack や Outlook、GitHub からの取り込み、クラウド上での本格的なデータ共有、複数人での本格運用向けのログイン・権限管理。これらは構想段階で未実装です。</p>
+  </div>
+
+</div>
+</body>
+</html>
