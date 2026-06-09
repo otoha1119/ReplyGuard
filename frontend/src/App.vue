@@ -2,13 +2,16 @@
 import { computed, onMounted, ref } from "vue";
 import type { MessageRecord, MessageState } from "./types";
 import {
+  type MessagesQuery,
   ConflictError,
   getMessages,
+  getProviders,
   triggerIngest,
   unarchiveMessage,
   updateMessageState,
 } from "./api";
 import MessageCard from "./components/MessageCard.vue";
+import FilterBar from "./components/FilterBar.vue";
 
 type Tab = "inbox" | "archive";
 
@@ -19,6 +22,18 @@ const error = ref<string | null>(null);
 const notice = ref<string | null>(null);
 const busyIds = ref<Set<string>>(new Set());
 const activeTab = ref<Tab>("inbox");
+const availableProviders = ref<string[]>([]);
+
+const inboxQuery = ref<MessagesQuery>({
+  archived: false,
+  order_by: "triage_score",
+  descending: true,
+});
+const archiveQuery = ref<MessagesQuery>({
+  archived: true,
+  order_by: "triage_score",
+  descending: true,
+});
 
 const unhandledCount = computed(
   () => records.value.filter((r) => r.state === "unhandled").length,
@@ -28,12 +43,22 @@ async function load(): Promise<void> {
   loading.value = true;
   error.value = null;
   try {
-    records.value = await getMessages(activeTab.value === "archive");
+    const query = activeTab.value === "inbox" ? inboxQuery.value : archiveQuery.value;
+    records.value = await getMessages(query);
   } catch (e) {
     error.value = e instanceof Error ? e.message : "読み込みに失敗しました.";
   } finally {
     loading.value = false;
   }
+}
+
+function onQueryChange(q: MessagesQuery): void {
+  if (activeTab.value === "inbox") {
+    inboxQuery.value = q;
+  } else {
+    archiveQuery.value = q;
+  }
+  void load();
 }
 
 async function switchTab(tab: Tab): Promise<void> {
@@ -102,7 +127,16 @@ async function onUnarchive(record: MessageRecord): Promise<void> {
   }
 }
 
-onMounted(load);
+onMounted(() => {
+  void load();
+  getProviders()
+    .then((ps) => {
+      availableProviders.value = ps;
+    })
+    .catch(() => {
+      // providers 取得失敗はフィルターチェックボックスが非表示になるだけで非致命的
+    });
+});
 </script>
 
 <template>
@@ -168,6 +202,12 @@ onMounted(load);
     <main class="main">
       <p v-if="error" class="banner err" role="alert">{{ error }}</p>
       <p v-if="notice" class="banner info" role="status">{{ notice }}</p>
+
+      <FilterBar
+        :model-value="activeTab === 'inbox' ? inboxQuery : archiveQuery"
+        :providers="availableProviders"
+        @update:model-value="onQueryChange"
+      />
 
       <p v-if="loading && records.length === 0" class="state-msg">読み込み中…</p>
       <p

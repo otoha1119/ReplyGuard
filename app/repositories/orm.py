@@ -26,6 +26,10 @@ class MessageRecordORM(Base):
     # 絞り込み・並べ替え用の非正規化列（email から複写）.
     is_unread: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     received_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # 絞り込み・プロバイダフィルタ用の非正規化列（email.provider から複写）.
+    provider: Mapped[str] = mapped_column(
+        String, nullable=False, default="gmail", index=True
+    )
     is_archived: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="0"
     )

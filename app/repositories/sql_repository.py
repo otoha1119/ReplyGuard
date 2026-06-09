@@ -10,7 +10,7 @@ tzinfo=UTC を再付与して aware な datetime として返す（SQLite が tz
 
 from datetime import datetime, timezone
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import sessionmaker
 
 from app.domain.fsm import assert_transition
@@ -23,6 +23,9 @@ from app.repositories.orm import MessageRecordORM
 _ORDER_COLUMNS = {
     "triage_score": MessageRecordORM.triage_score,
     "received_at": MessageRecordORM.received_at,
+    # SQLite 用: JSON 内の importance で並べ替え.
+    # PostgreSQL 切替時は analysis["importance"].as_integer() に変える.
+    "importance": func.json_extract(MessageRecordORM.analysis, "$.importance"),
 }
 
 
@@ -106,6 +109,7 @@ class SqlRepository:
                             triage_score=record.triage_score,
                             is_unread=record.email.is_unread,
                             received_at=received_at,
+                            provider=record.email.provider,
                             is_archived=False,
                             version=record.version,
                             created_at=now,
@@ -119,6 +123,7 @@ class SqlRepository:
                     existing.triage_score = record.triage_score
                     existing.is_unread = record.email.is_unread
                     existing.received_at = received_at
+                    existing.provider = record.email.provider
                     existing.updated_at = now
                     # state / version / created_at / is_archived は保持.
             session.commit()
@@ -139,6 +144,23 @@ class SqlRepository:
             stmt = stmt.where(MessageRecordORM.is_unread.is_(True))
         # archived フラグで常にフィルタ（False=メインフィード, True=アーカイブ）.
         stmt = stmt.where(MessageRecordORM.is_archived == q.archived)
+        if q.providers:
+            stmt = stmt.where(MessageRecordORM.provider.in_(q.providers))
+        if q.importance_min is not None:
+            # SQLite 用: JSON 内の importance で絞り込み.
+            # PostgreSQL 切替時は analysis["importance"].as_integer() に変える.
+            stmt = stmt.where(
+                func.json_extract(MessageRecordORM.analysis, "$.importance")
+                >= q.importance_min
+            )
+        if q.received_after is not None:
+            stmt = stmt.where(
+                MessageRecordORM.received_at >= _to_naive_utc(q.received_after)
+            )
+        if q.received_before is not None:
+            stmt = stmt.where(
+                MessageRecordORM.received_at <= _to_naive_utc(q.received_before)
+            )
         # message_id を第2キーにして決定的な順序にする.
         stmt = stmt.order_by(direction, MessageRecordORM.message_id.asc())
         stmt = stmt.limit(q.limit).offset(q.offset)
@@ -184,6 +206,17 @@ class SqlRepository:
             session.commit()
             refreshed = session.get(MessageRecordORM, message_id)
             return _to_record(refreshed)
+
+    def list_providers(self) -> list[str]:
+        """DB に存在する distinct な provider 一覧をアルファベット順で返す."""
+        stmt = (
+            select(MessageRecordORM.provider)
+            .distinct()
+            .order_by(MessageRecordORM.provider)
+        )
+        with self._session_factory() as session:
+            rows = session.execute(stmt).scalars().all()
+            return list(rows)
 
     def update_state(
         self, message_id: str, new_state: MessageState, expected_version: int

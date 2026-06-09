@@ -34,6 +34,46 @@ async function parseError(res: Response): Promise<string> {
   return `HTTP ${res.status}`;
 }
 
+export interface MessagesQuery {
+  archived?: boolean;
+  providers?: string[];
+  importance_min?: number;
+  received_after?: string;
+  received_before?: string;
+  order_by?: "triage_score" | "received_at" | "importance";
+  descending?: boolean;
+  unread_only?: boolean;
+}
+
+/** メッセージ一覧取得. */
+export async function getMessages(query: MessagesQuery = {}): Promise<MessageRecord[]> {
+  const params = new URLSearchParams();
+  if (query.archived !== undefined) params.set("archived", String(query.archived));
+  for (const p of query.providers ?? []) params.append("providers", p);
+  if (query.importance_min !== undefined && query.importance_min > 0) {
+    params.set("importance_min", String(query.importance_min));
+  }
+  if (query.received_after) params.set("received_after", query.received_after);
+  if (query.received_before) params.set("received_before", query.received_before);
+  params.set("order_by", query.order_by ?? "triage_score");
+  params.set("descending", String(query.descending ?? true));
+  if (query.unread_only) params.set("unread_only", "true");
+  const res = await fetch(`${API_BASE}/messages?${params.toString()}`);
+  if (!res.ok) {
+    throw new ApiError(await parseError(res), res.status);
+  }
+  return (await res.json()) as MessageRecord[];
+}
+
+/** 利用可能なプロバイダ一覧取得. */
+export async function getProviders(): Promise<string[]> {
+  const res = await fetch(`${API_BASE}/providers`);
+  if (!res.ok) {
+    throw new ApiError(await parseError(res), res.status);
+  }
+  return (await res.json()) as string[];
+}
+
 /** 状態変更(楽観ロック). 409 は ConflictError として投げ直す. */
 export async function updateMessageState(
   messageId: string,
@@ -61,16 +101,6 @@ export async function triggerIngest(): Promise<void> {
   if (!res.ok) {
     throw new ApiError(await parseError(res), res.status);
   }
-}
-
-/** メッセージ一覧取得. archived=false で受信トレイ, true でアーカイブ. */
-export async function getMessages(archived = false): Promise<MessageRecord[]> {
-  const url = `${API_BASE}/messages?archived=${archived}&order_by=triage_score&descending=true`;
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new ApiError(await parseError(res), res.status);
-  }
-  return (await res.json()) as MessageRecord[];
 }
 
 /** 手動アーカイブ. */

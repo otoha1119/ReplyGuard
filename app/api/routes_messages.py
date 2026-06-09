@@ -5,6 +5,7 @@
 （NotFound/Conflict/Transition）は main の例外ハンドラが HTTP へ写像する.
 """
 
+from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -44,8 +45,14 @@ def list_messages(
     archived: bool = Query(default=False),
     limit: int = Query(default=100, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
-    order_by: Literal["triage_score", "received_at"] = Query(default="triage_score"),
+    order_by: Literal["triage_score", "received_at", "importance"] = Query(
+        default="triage_score"
+    ),
     descending: bool = Query(default=True),
+    providers: list[str] = Query(default=[]),
+    importance_min: int | None = Query(default=None, ge=1, le=5),
+    received_after: datetime | None = Query(default=None),
+    received_before: datetime | None = Query(default=None),
     repo: Repository = Depends(get_repo),
 ) -> list[MessageRecord]:
     q = MessageQuery(
@@ -56,6 +63,10 @@ def list_messages(
         offset=offset,
         order_by=order_by,
         descending=descending,
+        providers=providers,
+        importance_min=importance_min,
+        received_after=received_after,
+        received_before=received_before,
     )
     return repo.query(q)
 
@@ -118,6 +129,16 @@ def unarchive_message(
     repo: Repository = Depends(get_repo),
 ) -> MessageRecord:
     return repo.unarchive(message_id)
+
+
+@router.get(
+    "/providers",
+    response_model=list[str],
+    tags=["messages"],
+    dependencies=[AuthDep],
+)
+def list_providers(repo: Repository = Depends(get_repo)) -> list[str]:
+    return repo.list_providers()
 
 
 @router.post(

@@ -127,3 +127,75 @@ def test_done_via_state_endpoint_auto_archives(api_client):
     # アーカイブビューに出ること.
     archive = client.get("/messages", params={"archived": "true"}).json()
     assert any(m["message_id"] == "gmail:1" for m in archive)
+
+
+# --- GET /providers -------------------------------------------------------
+
+def test_list_providers_endpoint(api_client):
+    client, _ = api_client
+    resp = client.get("/providers")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, list)
+    assert "gmail" in data
+
+
+# --- GET /messages?providers= --------------------------------------------
+
+def test_list_messages_filter_by_provider(api_client):
+    client, _ = api_client
+    resp = client.get("/messages", params={"providers": "gmail"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) > 0
+    assert all(m["email"]["provider"] == "gmail" for m in data)
+
+
+def test_list_messages_filter_by_unknown_provider_returns_empty(api_client):
+    client, _ = api_client
+    resp = client.get("/messages", params={"providers": "slack"})
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+# --- GET /messages?importance_min= ---------------------------------------
+
+def test_list_messages_filter_by_importance_min(api_client):
+    from app.models import AnalysisResult
+    from tests.conftest import make_record as _make_record
+    client, repo = api_client
+    # importance=5 のレコードを追加.
+    r_high = _make_record("high", analysis=AnalysisResult(importance=5))
+    r_low = _make_record("low", analysis=AnalysisResult(importance=2))
+    repo.upsert_messages([r_high, r_low])
+    resp = client.get("/messages", params={"importance_min": 4})
+    assert resp.status_code == 200
+    ids = [m["message_id"] for m in resp.json()]
+    assert "gmail:high" in ids
+    assert "gmail:low" not in ids
+
+
+def test_list_messages_importance_min_validation(api_client):
+    client, _ = api_client
+    resp = client.get("/messages", params={"importance_min": 0})
+    assert resp.status_code == 422
+    resp = client.get("/messages", params={"importance_min": 6})
+    assert resp.status_code == 422
+
+
+# --- GET /messages?order_by=received_at / importance ---------------------
+
+def test_list_messages_order_by_received_at(api_client):
+    client, _ = api_client
+    resp = client.get("/messages", params={"order_by": "received_at", "descending": "false"})
+    assert resp.status_code == 200
+
+
+def test_list_messages_order_by_importance(api_client):
+    from app.models import AnalysisResult
+    from tests.conftest import make_record as _make_record
+    client, repo = api_client
+    r = _make_record("imp", analysis=AnalysisResult(importance=4))
+    repo.upsert_messages([r])
+    resp = client.get("/messages", params={"order_by": "importance", "descending": "true"})
+    assert resp.status_code == 200
