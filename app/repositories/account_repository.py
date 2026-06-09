@@ -32,7 +32,8 @@ class AccountRepository:
             rows = session.execute(stmt).scalars().all()
             return [
                 AccountConfig(
-                    id=r.id, provider=r.provider, label=r.label, created_at=r.created_at
+                    id=r.id, provider=r.provider, label=r.label,
+                    address=r.address, created_at=r.created_at,
                 )
                 for r in rows
             ]

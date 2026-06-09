@@ -97,6 +97,7 @@ class IngestionService:
                     analysis=analysis,
                     triage_score=score,
                     urgency_score=urgency,
+                    account_address=source.address,
                 )
                 records.append(record)
                 is_new_by_id[message_id] = existing is None

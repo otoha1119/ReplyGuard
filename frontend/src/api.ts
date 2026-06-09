@@ -37,6 +37,7 @@ async function parseError(res: Response): Promise<string> {
 export interface MessagesQuery {
   archived?: boolean;
   providers?: string[];
+  account_addresses?: string[];
   importance_min?: number;
   received_after?: string;
   received_before?: string;
@@ -50,6 +51,7 @@ export async function getMessages(query: MessagesQuery = {}): Promise<MessageRec
   const params = new URLSearchParams();
   if (query.archived !== undefined) params.set("archived", String(query.archived));
   for (const p of query.providers ?? []) params.append("providers", p);
+  for (const a of query.account_addresses ?? []) params.append("account_addresses", a);
   if (query.importance_min !== undefined && query.importance_min > 0) {
     params.set("importance_min", String(query.importance_min));
   }

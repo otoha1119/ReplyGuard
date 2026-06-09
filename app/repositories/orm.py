@@ -33,6 +33,10 @@ class MessageRecordORM(Base):
     provider: Mapped[str] = mapped_column(
         String, nullable=False, default="gmail", index=True
     )
+    # アカウントフィルタ用（受信アカウントのメールアドレス）.
+    account_address: Mapped[str] = mapped_column(
+        String, nullable=False, default="", server_default="", index=True
+    )
     is_archived: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="0"
     )

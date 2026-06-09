@@ -28,12 +28,12 @@ const availableProviders = ref<string[]>([]);
 
 const inboxQuery = ref<MessagesQuery>({
   archived: false,
-  order_by: "triage_score",
+  order_by: "importance",
   descending: true,
 });
 const archiveQuery = ref<MessagesQuery>({
   archived: true,
-  order_by: "triage_score",
+  order_by: "importance",
   descending: true,
 });
 
@@ -153,10 +153,12 @@ function toggleAutoRefresh(): void {
 // --- アカウント管理 ---
 const showAccounts = ref(false);
 const hasAccounts = ref<boolean | null>(null);
+const accountsList = ref<import("./types").AccountConfig[]>([]);
 
 async function refreshAccountStatus(): Promise<void> {
   try {
     const acs = await getAccounts();
+    accountsList.value = acs;
     hasAccounts.value = acs.length > 0;
   } catch {
     // 取得失敗時は判定を null のまま（既存の空状態を表示しない）
@@ -265,6 +267,7 @@ onUnmounted(() => { stopAutoRefresh(); });
       <FilterBar
         :model-value="activeTab === 'inbox' ? inboxQuery : archiveQuery"
         :providers="availableProviders"
+        :accounts="accountsList"
         @update:model-value="onQueryChange"
       />
 

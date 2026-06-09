@@ -66,6 +66,7 @@ def _to_record(orm: MessageRecordORM) -> MessageRecord:
         state=MessageState(orm.state),
         triage_score=orm.triage_score,
         urgency_score=orm.urgency_score,
+        account_address=orm.account_address,
         is_archived=orm.is_archived,
         version=orm.version,
         created_at=_to_aware_utc(orm.created_at),
@@ -110,6 +111,7 @@ class SqlRepository:
                             state=record.state.value,
                             triage_score=record.triage_score,
                             urgency_score=record.urgency_score,
+                            account_address=record.account_address,
                             is_unread=record.email.is_unread,
                             received_at=received_at,
                             provider=record.email.provider,
@@ -125,6 +127,7 @@ class SqlRepository:
                     existing.analysis = analysis_json
                     existing.triage_score = record.triage_score
                     existing.urgency_score = record.urgency_score
+                    existing.account_address = record.account_address
                     existing.is_unread = record.email.is_unread
                     existing.received_at = received_at
                     existing.provider = record.email.provider
@@ -150,6 +153,8 @@ class SqlRepository:
         stmt = stmt.where(MessageRecordORM.is_archived == q.archived)
         if q.providers:
             stmt = stmt.where(MessageRecordORM.provider.in_(q.providers))
+        if q.account_addresses:
+            stmt = stmt.where(MessageRecordORM.account_address.in_(q.account_addresses))
         if q.importance_min is not None:
             # SQLite 用: JSON 内の importance で絞り込み.
             # PostgreSQL 切替時は analysis["importance"].as_integer() に変える.

@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import type { MessagesQuery } from "../api";
+import type { AccountConfig } from "../types";
 
 const props = defineProps<{
   modelValue: MessagesQuery;
   providers: string[];
+  accounts: AccountConfig[];
 }>();
 
 const emit = defineEmits<{
@@ -90,11 +92,32 @@ function setUnreadOnly(e: Event): void {
   patch({ unread_only: checked || undefined });
 }
 
+// --- Accounts ---
+function isAccountChecked(address: string): boolean {
+  const as = props.modelValue.account_addresses;
+  return !as || as.length === 0 || as.includes(address);
+}
+
+function toggleAccount(address: string): void {
+  const current = props.modelValue.account_addresses ?? [];
+  const allAddresses = props.accounts.map((a) => a.address);
+  if (current.length === 0) {
+    patch({ account_addresses: allAddresses.filter((x) => x !== address) });
+  } else if (current.includes(address)) {
+    const next = current.filter((x) => x !== address);
+    patch({ account_addresses: next });
+  } else {
+    const next = [...current, address];
+    patch({ account_addresses: next.length >= allAddresses.length ? [] : next });
+  }
+}
+
 // --- Active filter count (sort 除く) ---
 const activeFilterCount = computed<number>(() => {
   let n = 0;
   const q = props.modelValue;
   if (q.providers && q.providers.length > 0) n++;
+  if (q.account_addresses && q.account_addresses.length > 0) n++;
   if (q.importance_min && q.importance_min > 0) n++;
   if (q.received_after) n++;
   if (q.received_before) n++;
@@ -164,6 +187,25 @@ function capitalize(s: string): string {
       role="group"
       aria-label="フィルター条件"
     >
+      <!-- アカウント -->
+      <div v-if="accounts.length > 0" class="filter-group">
+        <span class="group-label">アカウント</span>
+        <div class="checkbox-row">
+          <label
+            v-for="ac in accounts"
+            :key="ac.id"
+            class="check-item"
+          >
+            <input
+              type="checkbox"
+              :checked="isAccountChecked(ac.address)"
+              @change="toggleAccount(ac.address)"
+            />
+            {{ ac.label }}
+          </label>
+        </div>
+      </div>
+
       <!-- プロバイダ -->
       <div v-if="providers.length > 0" class="filter-group">
         <span class="group-label">アプリ</span>

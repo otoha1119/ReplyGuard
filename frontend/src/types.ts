@@ -39,6 +39,7 @@ export interface MessageRecord {
   analysis: AnalysisResult | null;
   state: MessageState;
   triage_score: number;
+  account_address: string;
   version: number;
   is_archived: boolean;
   created_at: string | null;
@@ -57,6 +58,7 @@ export interface AccountConfig {
   id: string;
   provider: string;
   label: string;
+  address: string;
   created_at: string | null;
 }
 

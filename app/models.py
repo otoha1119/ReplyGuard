@@ -64,6 +64,7 @@ class MessageRecord(BaseModel):
     state: MessageState = MessageState.UNHANDLED
     triage_score: float = 0.0     # 未対応検知スコア(未読×重要度×経過時間)
     urgency_score: float = 0.0    # 期限緊急度スコア(deadline 近接度)
+    account_address: str = ""     # 受信アカウントのメールアドレス
     is_archived: bool = False     # メインフィードから隠す可視性フラグ（状態とは独立）
     version: int = 0              # 楽観ロック用
     created_at: datetime | None = None
@@ -83,6 +84,7 @@ class AccountConfig(BaseModel):
     id: str
     provider: str
     label: str
+    address: str = ""
     created_at: datetime | None = None
 
 
