@@ -102,3 +102,15 @@ class AccountConfigCreate(BaseModel):
         if v not in _SUPPORTED_PROVIDERS:
             raise ValueError(f"未対応のプロバイダ: {v}（対応: {_SUPPORTED_PROVIDERS}）")
         return v
+
+    @field_validator("address")
+    @classmethod
+    def _strip_address(cls, v: str) -> str:
+        return v.strip()
+
+    @field_validator("credential")
+    @classmethod
+    def _normalize_credential(cls, v: str) -> str:
+        # Google のアプリパスワードは「xxxx xxxx xxxx xxxx」形式で表示されるため
+        # コピペでスペースが混入しやすい. 全スペースを除去して正規化する.
+        return v.replace(" ", "").strip()

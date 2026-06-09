@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from app.adapters.sources.gmail_imap import GmailImapSource
 from app.api.deps import AuthDep, get_account_repo
 from app.models import AccountConfig, AccountConfigCreate
 from app.repositories.account_repository import AccountRepository
@@ -30,6 +31,11 @@ def create_account(
     body: AccountConfigCreate,
     repo: AccountRepository = Depends(get_account_repo),
 ) -> AccountConfig:
+    if body.provider == "gmail":
+        try:
+            GmailImapSource.verify_credentials(body.address, body.credential)
+        except RuntimeError as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     return repo.create(
         provider=body.provider,
         label=body.label,

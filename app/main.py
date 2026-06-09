@@ -58,6 +58,21 @@ async def lifespan(app: FastAPI):
     app.state.state_service = state_service
     app.state.scheduler = None
 
+    # env 変数にアカウントが設定されていて DB に未登録なら自動登録する.
+    if settings.gmail_address and settings.gmail_app_password:
+        existing_addresses = {a["address"] for a in account_repo.list_for_ingest()}
+        if settings.gmail_address not in existing_addresses:
+            try:
+                account_repo.create(
+                    provider="gmail",
+                    label=settings.gmail_address,
+                    address=settings.gmail_address,
+                    credential=settings.gmail_app_password,
+                )
+                logger.info("env 変数のアカウントを DB に自動登録: %s", settings.gmail_address)
+            except Exception:
+                logger.exception("env 変数のアカウント自動登録に失敗（起動は継続）")
+
     if settings.ingest_on_startup:
         try:
             ingestion.run_once()
@@ -81,7 +96,7 @@ app = FastAPI(title="ReplyGuard API", version="0.2.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=get_settings().origins_list,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],
 )
 

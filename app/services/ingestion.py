@@ -78,7 +78,7 @@ class IngestionService:
             try:
                 all_emails.extend(source.list_recent(self._settings.ingest_limit))
             except Exception:
-                logger.exception("ingest: ソースの取得に失敗")
+                logger.exception("ingest: ソースの取得に失敗 address=%s", source.address)
 
         fetched = len(all_emails)
         records: list[MessageRecord] = []
