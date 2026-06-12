@@ -1,13 +1,21 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import type { MessageRecord, MessageState } from "./types";
 import {
+  type MessagesQuery,
   ConflictError,
-  fetchMessages,
+  getMessages,
+  getProviders,
   triggerIngest,
+  unarchiveMessage,
   updateMessageState,
+  getAccounts,
 } from "./api";
 import MessageCard from "./components/MessageCard.vue";
+import FilterBar from "./components/FilterBar.vue";
+import AccountsModal from "./components/AccountsModal.vue";
+
+type Tab = "inbox" | "archive";
 
 const records = ref<MessageRecord[]>([]);
 const loading = ref(false);
@@ -15,6 +23,19 @@ const ingesting = ref(false);
 const error = ref<string | null>(null);
 const notice = ref<string | null>(null);
 const busyIds = ref<Set<string>>(new Set());
+const activeTab = ref<Tab>("inbox");
+const availableProviders = ref<string[]>([]);
+
+const inboxQuery = ref<MessagesQuery>({
+  archived: false,
+  order_by: "importance",
+  descending: true,
+});
+const archiveQuery = ref<MessagesQuery>({
+  archived: true,
+  order_by: "importance",
+  descending: true,
+});
 
 const unhandledCount = computed(
   () => records.value.filter((r) => r.state === "unhandled").length,
@@ -24,12 +45,28 @@ async function load(): Promise<void> {
   loading.value = true;
   error.value = null;
   try {
-    records.value = await fetchMessages();
+    const query = activeTab.value === "inbox" ? inboxQuery.value : archiveQuery.value;
+    records.value = await getMessages(query);
   } catch (e) {
     error.value = e instanceof Error ? e.message : "読み込みに失敗しました.";
   } finally {
     loading.value = false;
   }
+}
+
+function onQueryChange(q: MessagesQuery): void {
+  if (activeTab.value === "inbox") {
+    inboxQuery.value = q;
+  } else {
+    archiveQuery.value = q;
+  }
+  void load();
+}
+
+async function switchTab(tab: Tab): Promise<void> {
+  if (activeTab.value === tab) return;
+  activeTab.value = tab;
+  await load();
 }
 
 async function onIngest(): Promise<void> {
@@ -62,15 +99,9 @@ async function onChangeState(
   error.value = null;
   notice.value = null;
   try {
-    const updated = await updateMessageState(
-      record.message_id,
-      state,
-      record.version,
-    );
-    const idx = records.value.findIndex(
-      (r) => r.message_id === record.message_id,
-    );
-    if (idx !== -1) records.value[idx] = updated;
+    await updateMessageState(record.message_id, state, record.version);
+    // done/dismissed 後にバックエンドが自動アーカイブするため全件リフェッチ
+    await load();
   } catch (e) {
     if (e instanceof ConflictError) {
       notice.value = e.message;
@@ -83,7 +114,73 @@ async function onChangeState(
   }
 }
 
-onMounted(load);
+async function onUnarchive(record: MessageRecord): Promise<void> {
+  setBusy(record.message_id, true);
+  error.value = null;
+  notice.value = null;
+  try {
+    await unarchiveMessage(record.message_id);
+    await load();
+    notice.value = "受信トレイに復元しました.";
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "復元に失敗しました.";
+  } finally {
+    setBusy(record.message_id, false);
+  }
+}
+
+const AUTO_REFRESH_INTERVAL_MS = 60_000;
+let autoRefreshTimer: ReturnType<typeof setInterval> | null = null;
+const autoRefresh = ref(true);
+
+function startAutoRefresh(): void {
+  if (autoRefreshTimer !== null) return;
+  autoRefreshTimer = setInterval(() => { void load(); }, AUTO_REFRESH_INTERVAL_MS);
+}
+
+function stopAutoRefresh(): void {
+  if (autoRefreshTimer !== null) {
+    clearInterval(autoRefreshTimer);
+    autoRefreshTimer = null;
+  }
+}
+
+function toggleAutoRefresh(): void {
+  autoRefresh.value = !autoRefresh.value;
+  autoRefresh.value ? startAutoRefresh() : stopAutoRefresh();
+}
+
+// --- アカウント管理 ---
+const showAccounts = ref(false);
+const hasAccounts = ref<boolean | null>(null);
+const accountsList = ref<import("./types").AccountConfig[]>([]);
+
+async function refreshAccountStatus(): Promise<void> {
+  try {
+    const acs = await getAccounts();
+    accountsList.value = acs;
+    hasAccounts.value = acs.length > 0;
+  } catch {
+    // 取得失敗時は判定を null のまま（既存の空状態を表示しない）
+    hasAccounts.value = null;
+  }
+}
+
+function onAccountsChanged(): void {
+  void refreshAccountStatus();
+  void load();
+}
+
+onMounted(() => {
+  void load();
+  getProviders()
+    .then((ps) => { availableProviders.value = ps; })
+    .catch(() => {});
+  void refreshAccountStatus();
+  startAutoRefresh();
+});
+
+onUnmounted(() => { stopAutoRefresh(); });
 </script>
 
 <template>
@@ -94,9 +191,30 @@ onMounted(load);
         <span class="tag-line">受信トレイ管制塔</span>
       </div>
       <div class="bar-right">
-        <span class="counter" :class="{ alert: unhandledCount > 0 }">
+        <span
+          v-if="activeTab === 'inbox'"
+          class="counter"
+          :class="{ alert: unhandledCount > 0 }"
+        >
           未対応 {{ unhandledCount }}
         </span>
+        <button
+          type="button"
+          class="accounts-btn"
+          @click="showAccounts = true"
+        >
+          アカウント
+        </button>
+        <button
+          type="button"
+          class="auto-refresh-btn"
+          :class="{ active: autoRefresh }"
+          :aria-pressed="autoRefresh ? 'true' : 'false'"
+          :title="autoRefresh ? '自動更新 オン（クリックでオフ）' : '自動更新 オフ（クリックでオン）'"
+          @click="toggleAutoRefresh"
+        >
+          {{ autoRefresh ? "自動 ●" : "自動 ○" }}
+        </button>
         <button
           type="button"
           class="refresh"
@@ -108,7 +226,7 @@ onMounted(load);
         <button
           type="button"
           class="ingest"
-          :disabled="ingesting"
+          :disabled="loading || ingesting"
           @click="onIngest"
         >
           {{ ingesting ? "取り込み中…" : "手動更新" }}
@@ -116,16 +234,63 @@ onMounted(load);
       </div>
     </header>
 
+    <nav class="tabs" role="tablist" aria-label="メールビュー切り替え">
+      <button
+        role="tab"
+        :aria-selected="activeTab === 'inbox'"
+        class="tab"
+        :class="{ active: activeTab === 'inbox' }"
+        @click="switchTab('inbox')"
+      >
+        受信トレイ
+        <span
+          v-if="activeTab === 'inbox' && unhandledCount > 0"
+          class="tab-badge"
+          aria-hidden="true"
+        >{{ unhandledCount }}</span>
+      </button>
+      <button
+        role="tab"
+        :aria-selected="activeTab === 'archive'"
+        class="tab"
+        :class="{ active: activeTab === 'archive' }"
+        @click="switchTab('archive')"
+      >
+        アーカイブ
+      </button>
+    </nav>
+
     <main class="main">
       <p v-if="error" class="banner err" role="alert">{{ error }}</p>
       <p v-if="notice" class="banner info" role="status">{{ notice }}</p>
 
+      <FilterBar
+        :model-value="activeTab === 'inbox' ? inboxQuery : archiveQuery"
+        :providers="availableProviders"
+        :accounts="accountsList"
+        @update:model-value="onQueryChange"
+      />
+
       <p v-if="loading && records.length === 0" class="state-msg">読み込み中…</p>
+      <div
+        v-else-if="!loading && records.length === 0 && !error && hasAccounts === false"
+        class="state-msg no-account"
+      >
+        <p>アカウントが設定されていません.</p>
+        <button type="button" class="btn-add-account" @click="showAccounts = true">
+          アカウントを追加
+        </button>
+      </div>
       <p
         v-else-if="!loading && records.length === 0 && !error"
         class="state-msg"
       >
-        メッセージはありません. 「手動更新」で取り込んでください.
+        <template v-if="activeTab === 'inbox'">
+          メッセージはありません. 「手動更新」で取り込んでください.
+        </template>
+        <template v-else>
+          アーカイブにメッセージはありません.
+        </template>
       </p>
 
       <div v-else class="list">
@@ -134,10 +299,18 @@ onMounted(load);
           :key="r.message_id"
           :record="r"
           :busy="busyIds.has(r.message_id)"
+          :mode="activeTab"
           @change-state="(s) => onChangeState(r, s)"
+          @unarchive="onUnarchive(r)"
         />
       </div>
     </main>
+
+    <AccountsModal
+      v-if="showAccounts"
+      @close="showAccounts = false"
+      @accounts-changed="onAccountsChanged"
+    />
   </div>
 </template>
 
@@ -191,6 +364,8 @@ onMounted(load);
   border-color: var(--danger);
   font-weight: 700;
 }
+.accounts-btn,
+.auto-refresh-btn,
 .refresh,
 .ingest {
   font-size: 13px;
@@ -199,6 +374,10 @@ onMounted(load);
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--text);
+}
+.auto-refresh-btn.active {
+  color: var(--accent);
+  border-color: var(--accent);
 }
 .ingest {
   border-color: var(--accent);
@@ -209,6 +388,43 @@ onMounted(load);
 .ingest:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+.tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  margin-top: 12px;
+}
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.tab:hover {
+  color: var(--text);
+}
+.tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+.tab-badge {
+  font-size: 11px;
+  font-weight: 700;
+  background: var(--danger);
+  color: #fff;
+  border-radius: 999px;
+  padding: 1px 6px;
+  min-width: 16px;
+  text-align: center;
 }
 .main {
   margin-top: 16px;
@@ -233,6 +449,27 @@ onMounted(load);
   color: var(--text-muted);
   text-align: center;
   padding: 48px 0;
+}
+.no-account {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.no-account p {
+  margin: 0;
+}
+.btn-add-account {
+  font-size: 13px;
+  padding: 6px 16px;
+  border-radius: var(--radius);
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+.btn-add-account:hover {
+  opacity: 0.88;
 }
 .list {
   display: flex;

@@ -1,17 +1,22 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import type { MessageRecord, MessageState } from "../types";
 import { ACTIONABLE_STATES } from "../types";
 import ImportanceBadge from "./ImportanceBadge.vue";
 import StateBadge from "./StateBadge.vue";
 
-const props = defineProps<{
-  record: MessageRecord;
-  busy?: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    record: MessageRecord;
+    busy?: boolean;
+    mode?: "inbox" | "archive";
+  }>(),
+  { mode: "inbox" },
+);
 
 const emit = defineEmits<{
   (e: "change-state", state: MessageState): void;
+  (e: "unarchive"): void;
 }>();
 
 const STATE_LABELS: Record<MessageState, string> = {
@@ -54,6 +59,11 @@ const receivedAt = computed(() => {
 
 const triage = computed(() => props.record.triage_score.toFixed(1));
 
+const isArchive = computed(() => props.mode === "archive");
+
+const expanded = ref(false);
+const bodyText = computed(() => email.value.body_text?.trim() || null);
+
 // 現在の状態は遷移先ボタンから除く
 const nextStates = computed(() =>
   ACTIONABLE_STATES.filter((s) => s !== props.record.state),
@@ -61,45 +71,74 @@ const nextStates = computed(() =>
 </script>
 
 <template>
-  <article class="card" :class="{ unread: email.is_unread }">
-    <div class="top">
-      <ImportanceBadge :importance="importance" />
-      <div class="head">
-        <div class="subject-row">
-          <span class="subject">{{ email.subject || "(件名なし)" }}</span>
-          <span v-if="email.is_unread" class="unread-dot" title="未読" aria-label="未読" />
+  <article class="card" :class="{ unread: email.is_unread, archive: isArchive, expanded }">
+    <div
+      class="content-area"
+      role="button"
+      :aria-expanded="expanded"
+      tabindex="0"
+      @click="expanded = !expanded"
+      @keydown.enter.space.prevent="expanded = !expanded"
+    >
+      <div class="top">
+        <ImportanceBadge :importance="importance" />
+        <div class="head">
+          <div class="subject-row">
+            <span class="subject">{{ email.subject || "(件名なし)" }}</span>
+            <span v-if="email.is_unread" class="unread-dot" title="未読" aria-label="未読" />
+          </div>
+          <div class="meta">
+            <span class="sender">{{ email.sender || "(差出人不明)" }}</span>
+            <span class="dot">·</span>
+            <span class="provider">{{ email.provider }}</span>
+            <span v-if="receivedAt" class="dot">·</span>
+            <time v-if="receivedAt">{{ receivedAt }}</time>
+          </div>
         </div>
-        <div class="meta">
-          <span class="sender">{{ email.sender || "(差出人不明)" }}</span>
-          <span class="dot">·</span>
-          <span class="provider">{{ email.provider }}</span>
-          <span v-if="receivedAt" class="dot">·</span>
-          <time v-if="receivedAt">{{ receivedAt }}</time>
-        </div>
+        <StateBadge :state="record.state" />
       </div>
-      <StateBadge :state="record.state" />
+
+      <p v-if="!expanded" class="summary">{{ summary }}</p>
+
+      <div v-else class="body-expanded">
+        <p v-if="bodyText" class="body-text">{{ bodyText }}</p>
+        <p v-else class="summary summary-full">{{ summary }}</p>
+        <p v-if="analysis?.suggested_action" class="suggested-action">
+          <span class="suggested-label">提案：</span>{{ analysis.suggested_action }}
+        </p>
+      </div>
+
+      <div class="tags">
+        <span v-if="category" class="tag">{{ category }}</span>
+        <span v-if="weightLabel" class="tag weight">負荷 {{ weightLabel }}</span>
+        <span v-if="analysis?.needs_reply" class="tag reply">要返信</span>
+        <span class="tag triage" :title="`トリアージスコア ${triage}`">▲ {{ triage }}</span>
+        <span class="expand-icon" :aria-hidden="true">{{ expanded ? "▲" : "▼" }}</span>
+      </div>
     </div>
 
-    <p class="summary">{{ summary }}</p>
-
-    <div class="tags">
-      <span v-if="category" class="tag">{{ category }}</span>
-      <span v-if="weightLabel" class="tag weight">負荷 {{ weightLabel }}</span>
-      <span v-if="analysis?.needs_reply" class="tag reply">要返信</span>
-      <span class="tag triage" :title="`トリアージスコア ${triage}`">▲ {{ triage }}</span>
-    </div>
-
-    <div class="actions">
+    <div class="actions" @click.stop>
+      <template v-if="!isArchive">
+        <button
+          v-for="s in nextStates"
+          :key="s"
+          type="button"
+          class="act"
+          :class="`act-${s}`"
+          :disabled="busy"
+          @click="emit('change-state', s)"
+        >
+          {{ STATE_LABELS[s] }}
+        </button>
+      </template>
       <button
-        v-for="s in nextStates"
-        :key="s"
+        v-else
         type="button"
-        class="act"
-        :class="`act-${s}`"
+        class="act act-unarchive"
         :disabled="busy"
-        @click="emit('change-state', s)"
+        @click="emit('unarchive')"
       >
-        {{ STATE_LABELS[s] }}
+        復元
       </button>
     </div>
   </article>
@@ -117,6 +156,18 @@ const nextStates = computed(() =>
 }
 .card.unread {
   border-left: 3px solid var(--accent);
+}
+.content-area {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  cursor: pointer;
+  outline: none;
+  border-radius: calc(var(--radius) - 2px);
+}
+.content-area:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 .top {
   display: flex;
@@ -176,6 +227,40 @@ const nextStates = computed(() =>
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+.summary-full {
+  display: block;
+  -webkit-line-clamp: unset;
+  line-clamp: unset;
+  overflow: visible;
+}
+.body-expanded {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.body-text {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.6;
+  max-height: 400px;
+  overflow-y: auto;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.suggested-action {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.suggested-label {
+  color: var(--accent);
+  font-weight: 600;
+}
 .tags {
   display: flex;
   flex-wrap: wrap;
@@ -195,8 +280,14 @@ const nextStates = computed(() =>
   background: var(--accent-weak);
 }
 .tag.triage {
-  margin-left: auto;
   color: var(--text-muted);
+}
+.expand-icon {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-muted);
+  opacity: 0.5;
+  user-select: none;
 }
 .actions {
   display: flex;
@@ -228,5 +319,13 @@ const nextStates = computed(() =>
 .act-dismissed:hover:not(:disabled) {
   border-color: var(--text-muted);
   color: var(--text-muted);
+}
+.act-unarchive:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.card.archive {
+  background: var(--bg);
+  opacity: 0.85;
 }
 </style>

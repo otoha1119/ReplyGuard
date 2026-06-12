@@ -109,6 +109,25 @@ class GmailImapSource:
         self._preview_bytes = preview_bytes
         self._max_body_chars = max_body_chars
 
+    @property
+    def address(self) -> str:
+        return self._address
+
+    @staticmethod
+    def verify_credentials(address: str, app_password: str, *, timeout: int = 10) -> None:
+        """IMAP ログインで認証情報を検証する. 失敗時は RuntimeError を投げる."""
+        try:
+            imap = imaplib.IMAP4_SSL("imap.gmail.com", 993, timeout=timeout)
+        except OSError as e:
+            raise RuntimeError(f"IMAP サーバーへ接続できませんでした: {e}")
+        try:
+            imap.login(address, app_password)
+            imap.logout()
+        except imaplib.IMAP4.error:
+            raise RuntimeError(
+                "認証に失敗しました。2段階認証の有効化とアプリパスワードを確認してください。"
+            )
+
     def _connect(self) -> imaplib.IMAP4_SSL:
         if not self._address or not self._app_password:
             raise RuntimeError(

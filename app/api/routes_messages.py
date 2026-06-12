@@ -5,6 +5,7 @@
 （NotFound/Conflict/Transition）は main の例外ハンドラが HTTP へ写像する.
 """
 
+from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -41,19 +42,33 @@ router = APIRouter()
 def list_messages(
     state: MessageState | None = Query(default=None),
     unread_only: bool = Query(default=False),
+    archived: bool = Query(default=False),
     limit: int = Query(default=100, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
-    order_by: Literal["triage_score", "received_at"] = Query(default="triage_score"),
+    order_by: Literal["triage_score", "received_at", "importance"] = Query(
+        default="triage_score"
+    ),
     descending: bool = Query(default=True),
+    providers: list[str] = Query(default=[]),
+    account_addresses: list[str] = Query(default=[]),
+    importance_min: int | None = Query(default=None, ge=1, le=5),
+    received_after: datetime | None = Query(default=None),
+    received_before: datetime | None = Query(default=None),
     repo: Repository = Depends(get_repo),
 ) -> list[MessageRecord]:
     q = MessageQuery(
         state=state,
         unread_only=unread_only,
+        archived=archived,
         limit=limit,
         offset=offset,
         order_by=order_by,
         descending=descending,
+        providers=providers,
+        account_addresses=account_addresses,
+        importance_min=importance_min,
+        received_after=received_after,
+        received_before=received_before,
     )
     return repo.query(q)
 
@@ -90,6 +105,42 @@ def update_message_state(
 ) -> MessageRecord:
     # ドメイン例外は main の例外ハンドラが 404/409 へ写像する.
     return svc.transition(message_id, body.state, body.version)
+
+
+@router.post(
+    "/messages/{message_id}/archive",
+    response_model=MessageRecord,
+    tags=["messages"],
+    dependencies=[AuthDep],
+)
+def archive_message(
+    message_id: str,
+    repo: Repository = Depends(get_repo),
+) -> MessageRecord:
+    return repo.set_archived(message_id, True)
+
+
+@router.post(
+    "/messages/{message_id}/unarchive",
+    response_model=MessageRecord,
+    tags=["messages"],
+    dependencies=[AuthDep],
+)
+def unarchive_message(
+    message_id: str,
+    repo: Repository = Depends(get_repo),
+) -> MessageRecord:
+    return repo.unarchive(message_id)
+
+
+@router.get(
+    "/providers",
+    response_model=list[str],
+    tags=["messages"],
+    dependencies=[AuthDep],
+)
+def list_providers(repo: Repository = Depends(get_repo)) -> list[str]:
+    return repo.list_providers()
 
 
 @router.post(

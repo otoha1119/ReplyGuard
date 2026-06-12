@@ -12,7 +12,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class EmailMessage(BaseModel):
@@ -63,6 +63,9 @@ class MessageRecord(BaseModel):
     analysis: AnalysisResult | None = None
     state: MessageState = MessageState.UNHANDLED
     triage_score: float = 0.0     # 未対応検知スコア(未読×重要度×経過時間)
+    urgency_score: float = 0.0    # 期限緊急度スコア(deadline 近接度)
+    account_address: str = ""     # 受信アカウントのメールアドレス
+    is_archived: bool = False     # メインフィードから隠す可視性フラグ（状態とは独立）
     version: int = 0              # 楽観ロック用
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -70,3 +73,46 @@ class MessageRecord(BaseModel):
     @staticmethod
     def make_id(provider: str, raw_id: str) -> str:
         return f"{provider}:{raw_id}"
+
+
+_SUPPORTED_PROVIDERS = {"gmail"}
+
+
+class AccountConfig(BaseModel):
+    """アカウント設定（レスポンス用: 認証情報を含まない）."""
+
+    id: str
+    provider: str
+    label: str
+    address: str = ""
+    created_at: datetime | None = None
+
+
+class AccountConfigCreate(BaseModel):
+    """アカウント追加リクエスト. credential はレスポンスには返さない."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str
+    label: str
+    address: str
+    credential: str  # アプリパスワード等（保存後は API から取得不可）
+
+    @field_validator("provider")
+    @classmethod
+    def _validate_provider(cls, v: str) -> str:
+        if v not in _SUPPORTED_PROVIDERS:
+            raise ValueError(f"未対応のプロバイダ: {v}（対応: {_SUPPORTED_PROVIDERS}）")
+        return v
+
+    @field_validator("address")
+    @classmethod
+    def _strip_address(cls, v: str) -> str:
+        return v.strip()
+
+    @field_validator("credential")
+    @classmethod
+    def _normalize_credential(cls, v: str) -> str:
+        # Google のアプリパスワードは「xxxx xxxx xxxx xxxx」形式で表示されるため
+        # コピペでスペースが混入しやすい. 全スペースを除去して正規化する.
+        return v.replace(" ", "").strip()
