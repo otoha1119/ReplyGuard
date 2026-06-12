@@ -20,6 +20,12 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    if "account_configs" in inspector.get_table_names():
+        # create_all が先に最新スキーマで作成済み（新規 DB）の場合はスキップ.
+        return
+
     op.create_table(
         "account_configs",
         sa.Column("id", sa.String(), nullable=False),
