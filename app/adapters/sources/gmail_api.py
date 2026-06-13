@@ -16,8 +16,10 @@ import google.auth.exceptions
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 from app.models import EmailMessage
+from app.ports.source import RemovedMessage
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +74,70 @@ class GmailApiSource:
                     "メール取得失敗 (id=%s, account=%s)", m["id"], self._account_id
                 )
         return results
+
+    def detect_changes(
+        self, start_cursor: str | None
+    ) -> tuple[list[RemovedMessage], str | None]:
+        """前回 historyId 以降に INBOX から消えたメッセージと新カーソルを返す（読み取り専用）."""
+        try:
+            service = self._build_service()
+        except google.auth.exceptions.RefreshError:
+            logger.warning("Gmail OAuth token 失効 (account_id=%s)", self._account_id)
+            self._account_repo.set_auth_status(self._account_id, "reauth_required")
+            raise
+
+        if start_cursor is None:
+            # 初回: 現在の historyId を確立するだけ（差分なし）.
+            profile = service.users().getProfile(userId="me").execute()
+            hid = str(profile.get("historyId", "")) or None
+            return [], hid
+
+        archived_ids: set[str] = set()
+        deleted_ids: set[str] = set()
+        latest = start_cursor
+        page_token = None
+        try:
+            while True:
+                resp = (
+                    service.users()
+                    .history()
+                    .list(
+                        userId="me",
+                        startHistoryId=start_cursor,
+                        historyTypes=["labelRemoved", "labelAdded", "messageDeleted"],
+                        pageToken=page_token,
+                    )
+                    .execute()
+                )
+                if resp.get("historyId"):
+                    latest = str(resp["historyId"])
+                for h in resp.get("history", []):
+                    for d in h.get("messagesDeleted", []):
+                        deleted_ids.add(d["message"]["id"])
+                    for la in h.get("labelsAdded", []):
+                        if "TRASH" in la.get("labelIds", []):
+                            deleted_ids.add(la["message"]["id"])
+                    for lr in h.get("labelsRemoved", []):
+                        if "INBOX" in lr.get("labelIds", []):
+                            archived_ids.add(lr["message"]["id"])
+                page_token = resp.get("nextPageToken")
+                if not page_token:
+                    break
+        except HttpError as e:
+            if getattr(e, "resp", None) is not None and e.resp.status == 404:
+                # startHistoryId が古すぎて無効 → 差分を諦め, 現在カーソルへリセット.
+                logger.warning(
+                    "history startId 失効 (account_id=%s) — カーソル再確立", self._account_id
+                )
+                profile = service.users().getProfile(userId="me").execute()
+                return [], str(profile.get("historyId", "")) or None
+            raise
+
+        # 同一メッセージが両方に該当したら削除を優先.
+        archived_ids -= deleted_ids
+        removed = [RemovedMessage(gid, "deleted") for gid in sorted(deleted_ids)]
+        removed += [RemovedMessage(gid, "archived") for gid in sorted(archived_ids)]
+        return removed, latest
 
     def close(self) -> None:
         """no-op（HTTP セッションは GC に任せる）．"""

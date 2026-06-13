@@ -80,6 +80,10 @@ class Repository(Protocol):
         """DB に存在する distinct な provider 一覧をアルファベット順で返す."""
         ...
 
+    def delete(self, message_id: str) -> bool:
+        """message_id の行を物理削除する. 削除できたら True, 対象が無ければ False."""
+        ...
+
     def delete_by_account_address(self, account_address: str) -> int:
         """指定アカウントアドレスのメッセージを全件削除して件数を返す."""
         ...

@@ -137,6 +137,21 @@ class AccountRepository:
             row.auth_status = auth_status
             session.commit()
 
+    def get_history_id(self, account_id: str) -> str | None:
+        """Gmail History API カーソル（last_history_id）を取得する."""
+        with self._session_factory() as session:
+            row = session.get(AccountConfigORM, account_id)
+            return row.last_history_id if row is not None else None
+
+    def set_history_id(self, account_id: str, history_id: str) -> None:
+        """Gmail History API カーソルを保存する. 対象が無ければ no-op."""
+        with self._session_factory() as session:
+            row = session.get(AccountConfigORM, account_id)
+            if row is None:
+                return
+            row.last_history_id = history_id
+            session.commit()
+
     def delete(self, account_id: str) -> bool:
         """削除. 見つかった場合 True, なければ False."""
         with self._session_factory() as session:

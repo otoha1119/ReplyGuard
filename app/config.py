@@ -68,6 +68,10 @@ class Settings(BaseSettings):
     # 本文をLLMへ渡す際の最大文字数（コスト/漏洩面の上限）
     llm_max_body_chars: int = 4000
 
+    # === リモート削除/アーカイブ追随同期 ===
+    sync_remote_changes: bool = True
+    auto_archive_importance_threshold: int = 3
+
     # === 通知層 ===
     # "log"（既定・オフライン）| "email" | "slack"
     notifier: str = "log"
