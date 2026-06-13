@@ -27,6 +27,86 @@ logger = logging.getLogger(__name__)
 # 構造化出力は短い. 上限を控えめにしてコストを抑える.
 _MAX_TOKENS = 1024
 
+# AnalysisResult のうち LLM が出力するフィールドの JSON Schema（共通定義）.
+# "analyzer" は呼び出し側で上書きするため含めない.
+_RESPONSE_PROPERTIES: dict[str, Any] = {
+    "importance": {"type": "integer", "minimum": 1, "maximum": 5},
+    "needs_reply": {"type": "boolean"},
+    "task_weight": {"type": "string", "enum": ["light", "medium", "heavy"]},
+    "request_type": {
+        "type": "string",
+        "enum": [
+            "reply_required",
+            "task_required",
+            "review_required",
+            "approval_required",
+            "waiting_other",
+            "info_only",
+        ],
+    },
+    "has_deadline": {"type": "boolean"},
+    "is_direct": {"type": "boolean"},
+    "is_promotional": {"type": "boolean"},
+    "summary": {"type": "string"},
+    "suggested_action": {"type": ["string", "null"]},
+    "deadline": {"type": ["string", "null"]},
+    "reason": {"type": "string"},
+}
+
+# OpenAI / Ollama（OpenAI 互換）向け: response_format = json_schema (strict).
+_OPENAI_RESPONSE_FORMAT: dict[str, Any] = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "email_analysis",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": _RESPONSE_PROPERTIES,
+            "required": list(_RESPONSE_PROPERTIES.keys()),
+            "additionalProperties": False,
+        },
+    },
+}
+
+# Gemini 向け: response_schema（OpenAPI 風. type は大文字, nullable で表現）.
+_GEMINI_RESPONSE_SCHEMA: dict[str, Any] = {
+    "type": "OBJECT",
+    "properties": {
+        "importance": {"type": "INTEGER"},
+        "needs_reply": {"type": "BOOLEAN"},
+        "task_weight": {"type": "STRING", "enum": ["light", "medium", "heavy"]},
+        "request_type": {
+            "type": "STRING",
+            "enum": [
+                "reply_required",
+                "task_required",
+                "review_required",
+                "approval_required",
+                "waiting_other",
+                "info_only",
+            ],
+        },
+        "has_deadline": {"type": "BOOLEAN"},
+        "is_direct": {"type": "BOOLEAN"},
+        "is_promotional": {"type": "BOOLEAN"},
+        "summary": {"type": "STRING"},
+        "suggested_action": {"type": "STRING", "nullable": True},
+        "deadline": {"type": "STRING", "nullable": True},
+        "reason": {"type": "STRING"},
+    },
+    "required": [
+        "importance",
+        "needs_reply",
+        "task_weight",
+        "request_type",
+        "has_deadline",
+        "is_direct",
+        "is_promotional",
+        "summary",
+        "reason",
+    ],
+}
+
 
 class LLMAnalyzer:
     """Anthropic/OpenAI を用いた `Analyzer` 実装. 失敗時はスタブへフォールバック."""
@@ -103,6 +183,7 @@ class LLMAnalyzer:
         resp = client.chat.completions.create(
             model=self.model,
             max_tokens=_MAX_TOKENS,
+            response_format=_OPENAI_RESPONSE_FORMAT,  # JSON Schema 強制（出力は _parse で再検証）
             messages=[
                 {"role": "system", "content": SYSTEM_INSTRUCTION},
                 {"role": "user", "content": content},
@@ -125,7 +206,7 @@ class LLMAnalyzer:
         resp = client.chat.completions.create(
             model=self.model,
             max_tokens=_MAX_TOKENS,
-            response_format={"type": "json_object"},  # JSON 強制（出力は _parse で再検証）
+            response_format=_OPENAI_RESPONSE_FORMAT,  # JSON Schema 強制（出力は _parse で再検証）
             messages=[
                 {"role": "system", "content": SYSTEM_INSTRUCTION},
                 {"role": "user", "content": content},
@@ -143,8 +224,8 @@ class LLMAnalyzer:
                 api_key=self._api_key,
                 http_options={"timeout": self.timeout_seconds * 1000},
             )
-        # response_mime_type で必ず JSON を返させる. 出力は下の _parse + AnalysisResult で
-        # 再検証するため, ここではスキーマを強制せず素の JSON を受け取る（LLM05: 信用しない）.
+        # response_mime_type + response_schema で JSON スキーマを強制する. それでも
+        # 出力は下の _parse + AnalysisResult で再検証する（LLM05: 信用しない）.
         resp = client.models.generate_content(
             model=self.model,
             contents=content,
@@ -152,6 +233,7 @@ class LLMAnalyzer:
                 "system_instruction": SYSTEM_INSTRUCTION,
                 "max_output_tokens": _MAX_TOKENS,
                 "response_mime_type": "application/json",
+                "response_schema": _GEMINI_RESPONSE_SCHEMA,
             },
         )
         return resp.text

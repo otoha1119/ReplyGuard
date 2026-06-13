@@ -14,11 +14,22 @@ export interface EmailMessage {
 
 export type TaskWeight = "light" | "medium" | "heavy";
 
+export type RequestType =
+  | "reply_required"
+  | "task_required"
+  | "review_required"
+  | "approval_required"
+  | "waiting_other"
+  | "info_only";
+
 export interface AnalysisResult {
   importance: number; // 1-5
   needs_reply: boolean;
   task_weight: TaskWeight;
-  category: string;
+  request_type: RequestType;
+  has_deadline: boolean;
+  is_direct: boolean;
+  is_promotional: boolean;
   summary: string;
   suggested_action: string | null;
   deadline: string | null;

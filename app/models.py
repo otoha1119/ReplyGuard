@@ -29,6 +29,23 @@ class EmailMessage(BaseModel):
     body_text: str | None = None  # LLM 入力用の本文(先頭のみ・任意追加フィールド)
 
 
+# 対応区分（LLM が抽出するファクト）.
+# reply_required   : 返信が必要
+# task_required    : 返信以外の作業・タスクが必要
+# review_required  : 内容の確認・レビューが必要
+# approval_required: 承認・決裁が必要
+# waiting_other    : 他者対応待ち・自分のアクションは不要
+# info_only        : 情報共有のみ・対応不要
+RequestType = Literal[
+    "reply_required",
+    "task_required",
+    "review_required",
+    "approval_required",
+    "waiting_other",
+    "info_only",
+]
+
+
 class AnalysisResult(BaseModel):
     """LLM 分析層の出力。extra="forbid" で想定外キーを弾く(LLM05 対策)。"""
 
@@ -37,7 +54,10 @@ class AnalysisResult(BaseModel):
     importance: int = Field(ge=1, le=5)                       # 重要度 1-5
     needs_reply: bool = False                                 # 対応要否
     task_weight: Literal["light", "medium", "heavy"] = "light"
-    category: str = "fyi"                                     # 分類ラベル
+    request_type: RequestType = "info_only"                   # 対応区分
+    has_deadline: bool = False                                # 期限の有無
+    is_direct: bool = False                                   # 自分宛の直接対応依頼か
+    is_promotional: bool = False                              # 宣伝・広告・メルマガ等か
     summary: str = ""                                         # 要約
     suggested_action: str | None = None
     deadline: datetime | None = None

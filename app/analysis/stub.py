@@ -128,13 +128,12 @@ class StubAnalyzer:
         importance = max(1, min(5, importance))
 
         needs_reply = bool(urgent_hits)
+        is_promotional = bool(promo_hits and not urgent_hits)
 
-        if promo_hits and not urgent_hits:
-            category = "promo"
-        elif urgent_hits:
-            category = "action_required"
+        if needs_reply:
+            request_type = "reply_required"
         else:
-            category = "fyi"
+            request_type = "info_only"
 
         if not needs_reply:
             task_weight = "light"
@@ -167,7 +166,10 @@ class StubAnalyzer:
             importance=importance,
             needs_reply=needs_reply,
             task_weight=task_weight,
-            category=category,
+            request_type=request_type,
+            has_deadline=deadline is not None,
+            is_direct=needs_reply,
+            is_promotional=is_promotional,
             summary=_summarize(subject, body),
             suggested_action=suggested_action,
             deadline=deadline,

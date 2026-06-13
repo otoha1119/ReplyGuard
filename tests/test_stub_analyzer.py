@@ -23,7 +23,8 @@ def test_urgent_unread_raises_importance_and_needs_reply():
     )
     assert result.importance >= 4
     assert result.needs_reply is True
-    assert result.category == "action_required"
+    assert result.request_type == "reply_required"
+    assert result.is_direct is True
     assert result.task_weight in ("medium", "heavy")
     assert result.analyzer == "stub"
 
@@ -44,7 +45,7 @@ def test_promo_keywords_lower_importance():
     )
     assert result.importance <= 2
     assert result.needs_reply is False
-    assert result.category == "promo"
+    assert result.is_promotional is True
     assert result.suggested_action is None
 
 
@@ -56,7 +57,8 @@ def test_neutral_mail_is_default_importance():
     )
     assert result.importance == 3
     assert result.needs_reply is False
-    assert result.category == "fyi"
+    assert result.request_type == "info_only"
+    assert result.is_promotional is False
     assert result.task_weight == "light"
 
 

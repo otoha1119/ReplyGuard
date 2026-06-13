@@ -16,7 +16,10 @@ VALID_JSON = """{
   "importance": 5,
   "needs_reply": true,
   "task_weight": "heavy",
-  "category": "action_required",
+  "request_type": "reply_required",
+  "has_deadline": true,
+  "is_direct": true,
+  "is_promotional": false,
   "summary": "契約書の返信依頼",
   "suggested_action": "本日中に返信する",
   "deadline": "2026-06-15T00:00:00+00:00",
@@ -170,6 +173,12 @@ def test_invalid_json_falls_back_to_stub():
 
 def test_out_of_range_importance_falls_back():
     bad = VALID_JSON.replace('"importance": 5', '"importance": 99')
+    result = _make_anthropic(bad).analyze(make_email())
+    assert result.analyzer == "stub"
+
+
+def test_invalid_request_type_falls_back():
+    bad = VALID_JSON.replace('"request_type": "reply_required"', '"request_type": "unknown"')
     result = _make_anthropic(bad).analyze(make_email())
     assert result.analyzer == "stub"
 

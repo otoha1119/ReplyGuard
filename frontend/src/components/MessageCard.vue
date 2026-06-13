@@ -33,11 +33,21 @@ const WEIGHT_LABELS: Record<string, string> = {
   heavy: "重",
 };
 
+const REQUEST_TYPE_LABELS: Record<string, string> = {
+  reply_required: "返信",
+  task_required: "作業",
+  review_required: "確認",
+  approval_required: "承認",
+  waiting_other: "他者対応待ち",
+  info_only: "情報共有",
+};
+
 // どの分析器が判定したか（説明可能性）. 未知の値はそのまま表示する.
 const ANALYZER_LABELS: Record<string, string> = {
   gemini: "Gemini",
   anthropic: "Claude",
   openai: "GPT",
+  ollama: "Ollama",
   stub: "ルールベース",
 };
 
@@ -46,7 +56,10 @@ const analysis = computed(() => props.record.analysis);
 
 const importance = computed(() => analysis.value?.importance ?? 1);
 const summary = computed(() => analysis.value?.summary ?? email.value.snippet);
-const category = computed(() => analysis.value?.category ?? "");
+const requestTypeLabel = computed(() => {
+  const t = analysis.value?.request_type;
+  return t ? (REQUEST_TYPE_LABELS[t] ?? t) : "";
+});
 const weightLabel = computed(() => {
   const w = analysis.value?.task_weight;
   return w ? (WEIGHT_LABELS[w] ?? w) : "";
@@ -121,7 +134,7 @@ const nextStates = computed(() =>
       </div>
 
       <div class="tags">
-        <span v-if="category" class="tag">{{ category }}</span>
+        <span v-if="requestTypeLabel" class="tag">{{ requestTypeLabel }}</span>
         <span v-if="weightLabel" class="tag weight">負荷 {{ weightLabel }}</span>
         <span v-if="analysis?.needs_reply" class="tag reply">要返信</span>
         <span

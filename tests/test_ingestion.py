@@ -42,7 +42,7 @@ class CountingAnalyzer:
             importance=4,
             needs_reply=True,
             task_weight="medium",
-            category="action_required",
+            request_type="reply_required",
             summary="要約",
             reason="テスト",
             analyzer=self.name,
