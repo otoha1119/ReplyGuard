@@ -95,6 +95,22 @@ class MessageRecord(BaseModel):
         return f"{provider}:{raw_id}"
 
 
+class FeedbackCorrection(BaseModel):
+    """ユーザーが修正した分析結果（フィードバック入力）.
+
+    現在の予測値をベースにユーザーが変更した値を受け取る.
+    reason はユーザーの修正メモ（LLMプロンプトに注入するため300文字以内）.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    importance: int = Field(ge=1, le=6)
+    request_type: RequestType
+    is_promotional: bool = False
+    is_security_notification: bool = False
+    reason: str = Field(default="", max_length=300)
+
+
 _SUPPORTED_PROVIDERS = {"gmail", "slack"}
 
 

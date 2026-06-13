@@ -25,7 +25,7 @@ from app.api.schemas import (
     TokenResponse,
 )
 from app.config import Settings
-from app.models import MessageRecord, MessageState
+from app.models import FeedbackCorrection, MessageRecord, MessageState
 from app.ports import MessageQuery, Repository
 from app.services.ingestion import IngestionService
 from app.services.state_service import StateService
@@ -159,6 +159,37 @@ def trigger_ingest(
     ingestion: IngestionService = Depends(get_ingestion),
 ) -> dict:
     return ingestion.run_once()
+
+
+@router.post(
+    "/messages/{message_id}/feedback",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["messages"],
+    dependencies=[AuthDep],
+)
+def submit_feedback(
+    message_id: str,
+    body: FeedbackCorrection,
+    repo: Repository = Depends(get_repo),
+) -> None:
+    """ユーザーによる分析結果の修正を受け取る.
+
+    現時点ではログのみ。次フェーズでベクトルDBへの保存を追加する.
+    """
+    record = repo.get(message_id)
+    if record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="メッセージが見つかりません",
+        )
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(
+        "フィードバック受信: message_id=%s importance=%d request_type=%s",
+        message_id,
+        body.importance,
+        body.request_type,
+    )
 
 
 @router.post("/auth/login", response_model=TokenResponse, tags=["auth"])

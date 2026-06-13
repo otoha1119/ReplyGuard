@@ -28,6 +28,7 @@ export interface AnalysisResult {
   task_weight: TaskWeight;
   request_type: RequestType;
   is_promotional: boolean;
+  is_security_notification: boolean;
   summary: string;
   suggested_action: string | null;
   deadline: string | null;
@@ -62,6 +63,14 @@ export const ACTIONABLE_STATES: readonly MessageState[] = [
   "snoozed",
   "dismissed",
 ] as const;
+
+export interface FeedbackCorrection {
+  importance: number;
+  request_type: RequestType;
+  is_promotional: boolean;
+  is_security_notification: boolean;
+  reason: string;
+}
 
 export interface AccountConfig {
   id: string;
