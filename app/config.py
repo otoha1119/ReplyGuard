@@ -59,11 +59,15 @@ class Settings(BaseSettings):
     ingest_limit: int = 10
 
     # === LLM 分析層 ===
-    # "stub"（既定・オフライン）| "anthropic" | "openai" | "gemini"
+    # "stub"（既定・オフライン）| "anthropic" | "openai" | "gemini" | "ollama"
     analyzer: str = "stub"
     anthropic_api_key: str = ""
     openai_api_key: str = ""
     gemini_api_key: str = ""
+    # Ollama（別PCで動かす OpenAI 互換サーバ）. 例 http://192.168.1.50:11434
+    # API キー不要・従量課金/レート制限なし・本文は LAN 外に出ない. これを設定して
+    # ANALYZER=ollama にすると有効. 未設定なら stub にフォールバック.
+    ollama_base_url: str = ""
     # 空ならプロバイダ別の既定モデルを factory が解決する（例 gemini→gemini-2.5-flash-lite）.
     llm_model: str = ""
     llm_timeout_seconds: int = 30

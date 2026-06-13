@@ -93,6 +93,19 @@ def _make_gemini(text: str) -> LLMAnalyzer:
     )
 
 
+def _make_ollama(text: str) -> LLMAnalyzer:
+    # Ollama は OpenAI 互換なので FakeOpenAIClient をそのまま流用できる.
+    return LLMAnalyzer(
+        provider="ollama",
+        api_key="ollama",
+        model="qwen2.5",
+        timeout_seconds=30,
+        max_body_chars=4000,
+        base_url="http://ollama.local:11434/v1",
+        client=FakeOpenAIClient(text),
+    )
+
+
 def test_anthropic_valid_json_parsed():
     result = _make_anthropic(VALID_JSON).analyze(make_email())
     assert result.importance == 5
@@ -128,6 +141,18 @@ def test_gemini_extra_key_falls_back():
         '"reason": "x", "exec": "rm -rf /"',
     )
     result = _make_gemini(bad).analyze(make_email())
+    assert result.analyzer == "stub"
+
+
+def test_ollama_valid_json_parsed():
+    result = _make_ollama(VALID_JSON).analyze(make_email())
+    assert result.importance == 5
+    assert result.needs_reply is True
+    assert result.analyzer == "ollama"
+
+
+def test_ollama_invalid_json_falls_back_to_stub():
+    result = _make_ollama("これは JSON ではありません").analyze(make_email())
     assert result.analyzer == "stub"
 
 

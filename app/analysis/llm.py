@@ -1,6 +1,6 @@
-"""実 LLM 分析器（Anthropic / OpenAI）.
+"""実 LLM 分析器（Anthropic / OpenAI / Gemini / Ollama）.
 
-設定で analyzer="anthropic"/"openai" かつ API キーがある時だけ使う. SDK 呼び出しの
+設定で analyzer="anthropic"/"openai"/"gemini"/"ollama" の時だけ使う. SDK 呼び出しの
 失敗・タイムアウト・不正出力・スキーマ違反では決して落とさず, StubAnalyzer の結果へ
 フォールバックする（RESILIENCE）.
 
@@ -41,12 +41,14 @@ class LLMAnalyzer:
         max_body_chars: int,
         client: Any | None = None,
         fallback: Analyzer | None = None,
+        base_url: str | None = None,
     ) -> None:
         self.provider = provider
         self._api_key = api_key
         self.model = model
         self.timeout_seconds = timeout_seconds
         self.max_body_chars = max_body_chars
+        self._base_url = base_url  # OpenAI 互換サーバ（Ollama 等）の base url
         self._client = client  # テストでモック注入 / None なら遅延生成
         self._fallback: Analyzer = fallback or StubAnalyzer()
 
@@ -72,6 +74,8 @@ class LLMAnalyzer:
             return self._call_openai(content)
         if self.provider == "gemini":
             return self._call_gemini(content)
+        if self.provider == "ollama":
+            return self._call_ollama(content)
         raise ValueError(f"未対応の provider: {self.provider}")
 
     def _call_anthropic(self, content: str) -> str:
@@ -99,6 +103,29 @@ class LLMAnalyzer:
         resp = client.chat.completions.create(
             model=self.model,
             max_tokens=_MAX_TOKENS,
+            messages=[
+                {"role": "system", "content": SYSTEM_INSTRUCTION},
+                {"role": "user", "content": content},
+            ],
+        )
+        return resp.choices[0].message.content
+
+    def _call_ollama(self, content: str) -> str:
+        # Ollama の OpenAI 互換エンドポイント（/v1）を openai SDK で叩く.
+        # 別PCの自前サーバなので従量課金・レート制限なし. 本文は LAN 外に出ない.
+        client = self._client
+        if client is None:
+            import openai  # 遅延 import
+
+            client = openai.OpenAI(
+                api_key=self._api_key or "ollama",
+                base_url=self._base_url,
+                timeout=self.timeout_seconds,
+            )
+        resp = client.chat.completions.create(
+            model=self.model,
+            max_tokens=_MAX_TOKENS,
+            response_format={"type": "json_object"},  # JSON 強制（出力は _parse で再検証）
             messages=[
                 {"role": "system", "content": SYSTEM_INSTRUCTION},
                 {"role": "user", "content": content},
