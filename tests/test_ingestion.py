@@ -429,3 +429,34 @@ def test_sync_does_not_save_none_cursor() -> None:
     svc._sync_remote_changes([(src, acc)])
 
     mock_account_repo.set_history_id.assert_not_called()
+
+
+# ===========================================================================
+# _build_sources（GitHub プロバイダの結線・Task5）
+# ===========================================================================
+
+def test_build_sources_creates_github_source() -> None:
+    """provider=github のアカウントから GithubApiSource が構築される."""
+    from app.adapters.sources.github_api import GithubApiSource
+
+    svc, mock_repo, mock_account_repo = _make_service()
+    mock_account_repo.list_for_ingest.return_value = [
+        {
+            "id": "acc-gh",
+            "provider": "github",
+            "address": "octocat",
+            "credential": "",
+            "auth_type": "oauth",
+            "refresh_token": "",
+            "access_token": "gho_token",
+            "auth_status": "ok",
+        }
+    ]
+
+    pairs = svc._build_sources()
+
+    assert len(pairs) == 1
+    source, acc = pairs[0]
+    assert isinstance(source, GithubApiSource)
+    assert acc["access_token"] == "gho_token"
+    assert source.address == "octocat"

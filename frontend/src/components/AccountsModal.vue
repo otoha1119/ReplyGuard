@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from "vue";
 import type { AccountConfig, AccountConfigCreate } from "../types";
-import { getAccounts, createAccount, deleteAccount, startGmailOAuth } from "../api";
+import { getAccounts, createAccount, deleteAccount, startGmailOAuth, startGithubOAuth } from "../api";
 
 const emit = defineEmits<{
   "accounts-changed": [];
@@ -78,9 +78,11 @@ const addressPlaceholder = computed(() =>
   selectedProvider.value === "slack" ? "例: my-team" : "you@gmail.com"
 );
 const addressInputType = computed(() => (selectedProvider.value === "slack" ? "text" : "email"));
-const credentialLabel = computed(() =>
-  selectedProvider.value === "slack" ? "Bot User OAuth Token" : "アプリパスワード"
-);
+const credentialLabel = computed(() => {
+  if (selectedProvider.value === "slack") return "Bot User OAuth Token";
+  if (selectedProvider.value === "github") return "（不使用）";
+  return "アプリパスワード";
+});
 const credentialPlaceholder = computed(() =>
   selectedProvider.value === "slack" ? "xoxb-..." : "Google アプリパスワード（16桁）"
 );
@@ -106,6 +108,23 @@ async function onGoogleConnect(): Promise<void> {
   }
 }
 
+async function onGithubConnect(): Promise<void> {
+  oauthError.value = null;
+  if (!form.value.label.trim()) {
+    oauthError.value = "表示名を入力してください.";
+    return;
+  }
+  oauthLoading.value = true;
+  try {
+    const { auth_url } = await startGithubOAuth(form.value.label);
+    window.location.href = auth_url;
+  } catch (e) {
+    oauthError.value = e instanceof Error ? e.message : "OAuth 開始に失敗しました.";
+  } finally {
+    oauthLoading.value = false;
+  }
+}
+
 async function onSubmit(): Promise<void> {
   formError.value = null;
   if (!form.value.label.trim()) {
@@ -116,7 +135,7 @@ async function onSubmit(): Promise<void> {
     formError.value = `${addressLabel.value}を入力してください.`;
     return;
   }
-  if (selectedProvider.value !== "gmail" && !form.value.credential.trim()) {
+  if (selectedProvider.value !== "gmail" && selectedProvider.value !== "github" && !form.value.credential.trim()) {
     formError.value = `${credentialLabel.value}を入力してください.`;
     return;
   }
@@ -202,6 +221,14 @@ onMounted(() => {
           >
             Slack
           </button>
+          <button
+            type="button"
+            class="provider-btn"
+            :class="{ active: selectedProvider === 'github' }"
+            @click="selectProvider('github')"
+          >
+            GitHub
+          </button>
           <button type="button" class="provider-btn" disabled>
             Outlook
             <span class="soon-badge">近日公開</span>
@@ -210,7 +237,7 @@ onMounted(() => {
 
         <!-- フォーム -->
         <p v-if="formError" class="banner err" role="alert">{{ formError }}</p>
-        <form class="form" @submit.prevent="selectedProvider !== 'gmail' ? onSubmit() : undefined">
+        <form class="form" @submit.prevent="selectedProvider !== 'gmail' && selectedProvider !== 'github' ? onSubmit() : undefined">
           <div class="field">
             <label class="label" for="account-label">表示名</label>
             <input
@@ -223,7 +250,7 @@ onMounted(() => {
               @input="onLabelInput"
             />
           </div>
-          <div v-if="selectedProvider !== 'gmail'" class="field">
+          <div v-if="selectedProvider !== 'gmail' && selectedProvider !== 'github'" class="field">
             <label class="label" for="account-address">{{ addressLabel }}</label>
             <input
               id="account-address"
@@ -235,7 +262,7 @@ onMounted(() => {
               @input="onAddressInput"
             />
           </div>
-          <template v-if="selectedProvider !== 'gmail'">
+          <template v-if="selectedProvider !== 'gmail' && selectedProvider !== 'github'">
             <div class="field">
               <label class="label" for="account-credential">{{ credentialLabel }}</label>
               <input
@@ -261,6 +288,17 @@ onMounted(() => {
               @click="onGoogleConnect"
             >
               {{ oauthLoading ? "接続中..." : "Google アカウントで接続" }}
+            </button>
+            <p v-if="oauthError" class="error-text">{{ oauthError }}</p>
+          </template>
+          <template v-if="selectedProvider === 'github'">
+            <button
+              type="button"
+              class="oauth-btn oauth-btn--github"
+              :disabled="oauthLoading"
+              @click="onGithubConnect"
+            >
+              {{ oauthLoading ? "接続中..." : "GitHub で接続" }}
             </button>
             <p v-if="oauthError" class="error-text">{{ oauthError }}</p>
           </template>
@@ -534,6 +572,10 @@ onMounted(() => {
 .oauth-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.oauth-btn--github {
+  background: #24292e;
 }
 
 .error-text {

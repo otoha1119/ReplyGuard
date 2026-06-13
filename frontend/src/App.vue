@@ -11,6 +11,7 @@ import {
   updateMessageState,
   getAccounts,
   reauthGmailAccount,
+  reauthGithubAccount,
 } from "./api";
 import MessageCard from "./components/MessageCard.vue";
 import FilterBar from "./components/FilterBar.vue";
@@ -163,7 +164,11 @@ const reauthAccounts = computed(() =>
 
 async function onReauth(accountId: string): Promise<void> {
   try {
-    const { auth_url } = await reauthGmailAccount(accountId);
+    const provider = accountsList.value.find((a) => a.id === accountId)?.provider;
+    const { auth_url } =
+      provider === "github"
+        ? await reauthGithubAccount(accountId)
+        : await reauthGmailAccount(accountId);
     window.location.href = auth_url;
   } catch (e) {
     console.error("再接続 URL 取得失敗", e);
@@ -292,7 +297,7 @@ onUnmounted(() => { stopAutoRefresh(); });
     <main class="main">
       <!-- OAuth 成功バナー -->
       <div v-if="oauthSuccessBanner" class="banner banner--success">
-        Gmail アカウントの接続が完了しました．
+        アカウントの接続が完了しました．
         <button @click="oauthSuccessBanner = false">✕</button>
       </div>
 

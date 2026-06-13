@@ -15,6 +15,7 @@ import logging
 from datetime import datetime, timezone
 
 import google.auth.exceptions
+from app.adapters.sources.github_api import GithubApiSource
 from app.adapters.sources.gmail_api import GmailApiSource
 from app.adapters.sources.gmail_imap import GmailImapSource
 from app.adapters.sources.slack_api import SlackApiSource
@@ -101,6 +102,17 @@ class IngestionService:
                     SlackApiSource(
                         acc["credential"],
                         addr,
+                        max_body_chars=self._settings.llm_max_body_chars,
+                    ),
+                    acc,
+                ))
+            elif acc["provider"] == "github":
+                source_pairs.append((
+                    GithubApiSource(
+                        access_token=acc["access_token"],
+                        address=addr,
+                        account_id=acc["id"],
+                        account_repo=self._account_repo,
                         max_body_chars=self._settings.llm_max_body_chars,
                     ),
                     acc,
