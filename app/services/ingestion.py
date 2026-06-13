@@ -14,12 +14,15 @@ IngestionService は AccountRepository からアカウントを取得し, プロ
 import logging
 from datetime import datetime, timezone
 
+import google.auth.exceptions
+from app.adapters.sources.gmail_api import GmailApiSource
 from app.adapters.sources.gmail_imap import GmailImapSource
 from app.adapters.sources.slack_api import SlackApiSource
 from app.config import Settings
 from app.domain.triage import compute_triage_score, compute_urgency_score
 from app.models import MessageRecord
 from app.ports import Analyzer, Notifier, Repository
+from app.ports.source import RemovalDetectingSource
 from app.repositories.account_repository import AccountRepository
 
 logger = logging.getLogger(__name__)
@@ -46,39 +49,74 @@ class IngestionService:
         self._sources_override: list | None = None
 
     def _build_sources(self) -> list:
-        """DB アカウントからソースを構築. なければ env 変数のフォールバックを試みる."""
+        """DB アカウントからソースを構築. なければ env 変数のフォールバックを試みる.
+
+        戻り値: (source, acc_dict) のペアの list.
+        acc_dict は list_for_ingest() の dict（id / provider / address / ... を含む）.
+        source.address に頼らず acc["address"] を使うことで OAuth アカウント
+        （GmailApiSource.address が "" を返す）でも account_address が正しく記録される.
+
+        テスト用に _sources_override がセットされていれば DB/env 由来の構築を完全に
+        置き換える（実 Gmail/Slack を叩かずオフライン e2e するため）. override も
+        (source, acc_dict) ペアの list を返すこと.
+        """
         if self._sources_override is not None:
             return self._sources_override
         accounts = self._account_repo.list_for_ingest()
-        sources = []
+        source_pairs: list[tuple] = []
         for acc in accounts:
-            if acc["provider"] == "gmail":
-                sources.append(
-                    GmailImapSource(
-                        acc["address"],
-                        acc["credential"],
-                        max_body_chars=self._settings.llm_max_body_chars,
-                    )
+            # auth_status が ok 以外（reauth_required / revoked）ならスキップ
+            if acc.get("auth_status", "ok") not in ("ok", ""):
+                logger.warning(
+                    "アカウントスキップ (auth_status=%s, address=%s)",
+                    acc.get("auth_status"), acc.get("address"),
                 )
+                continue
+            addr = acc["address"]
+            if acc["provider"] == "gmail":
+                auth_type = acc.get("auth_type", "imap")
+                if auth_type == "oauth":
+                    source_pairs.append((
+                        GmailApiSource(
+                            refresh_token=acc["refresh_token"],
+                            client_id=self._settings.gmail_oauth_client_id,
+                            client_secret=self._settings.gmail_oauth_client_secret,
+                            account_id=acc["id"],
+                            account_repo=self._account_repo,
+                            max_body_chars=self._settings.llm_max_body_chars,
+                        ),
+                        acc,
+                    ))
+                else:
+                    source_pairs.append((
+                        GmailImapSource(
+                            addr,
+                            acc["credential"],
+                            max_body_chars=self._settings.llm_max_body_chars,
+                        ),
+                        acc,
+                    ))
             elif acc["provider"] == "slack":
-                sources.append(
+                source_pairs.append((
                     SlackApiSource(
                         acc["credential"],
-                        acc["address"],
+                        addr,
                         max_body_chars=self._settings.llm_max_body_chars,
-                    )
-                )
+                    ),
+                    acc,
+                ))
             # 将来: Outlook 等を追加
-        if not sources:
-            addr = self._settings.gmail_address
+        if not source_pairs:
+            env_addr = self._settings.gmail_address
             pw = self._settings.gmail_app_password
-            if addr and pw:
-                sources.append(
+            if env_addr and pw:
+                source_pairs.append((
                     GmailImapSource(
-                        addr, pw, max_body_chars=self._settings.llm_max_body_chars
-                    )
-                )
-        return sources
+                        env_addr, pw, max_body_chars=self._settings.llm_max_body_chars
+                    ),
+                    {"id": "", "provider": "gmail", "address": env_addr},
+                ))
+        return source_pairs
 
     def run_once(self) -> dict:
         """1 サイクル実行し件数を返す.
@@ -88,20 +126,31 @@ class IngestionService:
         """
         now = datetime.now(timezone.utc)
 
-        sources = self._build_sources()
-        if not sources:
+        # 削除済みアカウントのメッセージを自動クリーンアップ
+        valid_addresses = [acc["address"] for acc in self._account_repo.list_for_ingest()]
+        cleaned = self._repo.delete_orphan_messages(valid_addresses)
+        if cleaned:
+            logger.info("ingest: 孤立メッセージ %d 件を自動削除", cleaned)
+
+        source_pairs = self._build_sources()
+        if not source_pairs:
             logger.info("ingest: アクティブなアカウントなし - スキップ")
             return {"fetched": 0, "inserted": 0, "notified": 0}
 
-        # (email, source_address) のペアで収集し, 後段で source_address を正しく参照できるようにする.
-        # all_emails へ flatten してから source 変数を参照すると最後の source が全件に付く誤りが起きる.
+        # (email, account_address) のペアで収集する.
         email_source_pairs: list[tuple] = []
-        for source in sources:
+        for source, acc in source_pairs:
+            account_address = acc.get("address", "") if isinstance(acc, dict) else acc
             try:
-                for em in source.list_recent(self._settings.ingest_limit):
-                    email_source_pairs.append((em, source.address))
+                emails = source.list_recent(limit=self._settings.ingest_limit)
+            except google.auth.exceptions.RefreshError:
+                logger.warning("OAuth token 失効のためアカウントをスキップ（UI でリフレッシュ要）")
+                continue
             except Exception:
-                logger.exception("ingest: ソースの取得に失敗 address=%s", source.address)
+                logger.exception("取得失敗（継続）")
+                continue
+            for em in emails:
+                email_source_pairs.append((em, account_address))
 
         fetched = len(email_source_pairs)
         records: list[MessageRecord] = []
@@ -164,6 +213,12 @@ class IngestionService:
                 )
                 continue
 
+        if self._settings.sync_remote_changes:
+            try:
+                self._sync_remote_changes(source_pairs)
+            except Exception:
+                logger.exception("ingest: リモート削除追随で例外（全体は継続）")
+
         logger.info(
             "ingest 完了 fetched=%d inserted=%d notified=%d",
             fetched,
@@ -171,3 +226,39 @@ class IngestionService:
             notified,
         )
         return {"fetched": fetched, "inserted": inserted, "notified": notified}
+
+    def _sync_remote_changes(self, source_account_pairs: list) -> None:
+        """Gmail でのアーカイブ/削除を重要度しきい値以下に限り追随する（読み取り専用）."""
+        threshold = self._settings.auto_archive_importance_threshold
+        for source, acc in source_account_pairs:
+            if not isinstance(source, RemovalDetectingSource):
+                continue
+            account_id = acc.get("id") if isinstance(acc, dict) else ""
+            if not account_id:
+                continue
+            try:
+                start = self._account_repo.get_history_id(account_id)
+                removed, new_cursor = source.detect_changes(start)
+            except google.auth.exceptions.RefreshError:
+                continue  # 失効は detect_changes 側で auth_status を更新済み
+            except Exception:
+                logger.exception("削除追随の検知に失敗（継続）")
+                continue
+            provider = acc.get("provider", "gmail") if isinstance(acc, dict) else "gmail"
+            for r in removed:
+                message_id = MessageRecord.make_id(provider, r.raw_id)
+                try:
+                    rec = self._repo.get(message_id)
+                    if rec is None or rec.analysis is None:
+                        continue
+                    if rec.analysis.importance > threshold:
+                        continue  # 重要度が高いものは残す
+                    if r.kind == "deleted":
+                        self._repo.delete(message_id)
+                    else:
+                        self._repo.set_archived(message_id, True)
+                except Exception:
+                    logger.exception("削除追随の適用に失敗 message_id=%s", message_id)
+                    continue
+            if new_cursor is not None:
+                self._account_repo.set_history_id(account_id, new_cursor)

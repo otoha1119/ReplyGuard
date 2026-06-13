@@ -19,6 +19,7 @@ os.environ["ANALYZER"] = "stub"
 os.environ["SCHEDULER_ENABLED"] = "false"
 os.environ["INGEST_ON_STARTUP"] = "false"
 os.environ["NOTIFIER"] = "log"
+os.environ["SYNC_REMOTE_CHANGES"] = "false"
 # secrets/gmail.env の値で env フォールバック源が作られないように明示的に空へ.
 os.environ["GMAIL_ADDRESS"] = ""
 os.environ["GMAIL_APP_PASSWORD"] = ""
@@ -84,7 +85,11 @@ def main() -> None:
     get_settings.cache_clear()
     with TestClient(app) as client:
         # fake source / counting analyzer を注入（実 Gmail・LLM を叩かない）.
-        client.app.state.ingestion._sources_override = [CountingStubSource()]
+        # マージ後の run_once は (source, acc) ペアを期待する.
+        client.app.state.ingestion._sources_override = [
+            (CountingStubSource(),
+             {"id": "", "provider": "gmail", "address": "smoke@example.com"})
+        ]
         analyzer = CountingAnalyzer()
         client.app.state.ingestion._analyzer = analyzer
 
