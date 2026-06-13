@@ -276,3 +276,15 @@ def test_query_order_by_importance_desc(repo):
     repo.upsert_messages([r1, r2, r3])
     rows = repo.query(MessageQuery(order_by="importance", descending=True))
     assert [r.message_id for r in rows] == ["gmail:2", "gmail:1", "gmail:3"]
+
+
+# --- delete（物理削除）------------------------------------------------------
+
+def test_delete_existing_returns_true_and_removes(repo):
+    repo.upsert_messages([make_record("1")])
+    assert repo.delete("gmail:1") is True
+    assert repo.get("gmail:1") is None
+
+
+def test_delete_missing_returns_false(repo):
+    assert repo.delete("gmail:404") is False

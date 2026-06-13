@@ -186,6 +186,16 @@ class SqlRepository:
             session.commit()
             return result.rowcount
 
+    def delete(self, message_id: str) -> bool:
+        """message_id の行を物理削除する. 削除できたら True, 対象が無ければ False."""
+        with self._session_factory() as session:
+            orm = session.get(MessageRecordORM, message_id)
+            if orm is None:
+                return False
+            session.delete(orm)
+            session.commit()
+        return True
+
     def delete_orphan_messages(self, valid_addresses: list[str]) -> int:
         """有効アドレス一覧にないメッセージを全件削除する．起動時・ingest 時に孤立データを自動クリーンアップ．"""
         if not valid_addresses:

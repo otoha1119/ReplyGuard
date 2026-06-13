@@ -67,3 +67,4 @@ class AccountConfigORM(Base):
     token_expiry:  Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     scopes:        Mapped[str | None]     = mapped_column(String, nullable=True)
     auth_status:   Mapped[str]            = mapped_column(String, nullable=False, default="ok")
+    last_history_id: Mapped[str | None]  = mapped_column(String, nullable=True)
