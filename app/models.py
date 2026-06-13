@@ -111,7 +111,7 @@ class FeedbackCorrection(BaseModel):
     reason: str = Field(default="", max_length=300)
 
 
-_SUPPORTED_PROVIDERS = {"gmail", "slack"}
+_SUPPORTED_PROVIDERS = {"gmail", "slack", "github"}
 
 
 class AccountConfig(BaseModel):

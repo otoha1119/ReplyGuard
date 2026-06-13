@@ -20,39 +20,95 @@ const label = computed(() => LABELS[props.state]);
 </template>
 
 <style scoped>
+/*
+ * StateBadge — 淡地＋ocean文字＋色枠＋左ドット（::before）で状態を示す
+ * 色覚に依存しない冗長符号化: ドット色×枠色×地色の3重
+ * DESIGN.md §7 準拠．5色パレット（ocean/leaf/sand/sage）のみ使用．
+ */
+
 .state {
   display: inline-flex;
   align-items: center;
+  gap: 5px;
   height: 22px;
-  padding: 0 10px;
-  border-radius: 999px;
-  font-size: 12px;
+  padding: 0 10px 0 8px;
+  border-radius: var(--radius-pill);
+  font-size: 11px;
   font-weight: 600;
   border: 1px solid transparent;
+  white-space: nowrap;
+  flex-shrink: 0;
+  color: var(--ocean);
+  /* 状態色の遷移（background / border-color / color）を滑らかに */
+  transition:
+    background var(--dur-fast) var(--ease-out-expo),
+    border-color var(--dur-fast) var(--ease-out-expo),
+    color var(--dur-fast) var(--ease-out-expo),
+    transform var(--dur-fast) var(--ease-spring);
 }
+.state:hover {
+  transform: translateY(-1px) scale(1.03);
+}
+
+/* 色ドット（::before で疑似要素） */
+.state::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  transition: background var(--dur-fast) var(--ease-out-expo);
+}
+
+/* unhandled（未対応）= ocean: 最も目立つ・要対応 */
 .state-unhandled {
-  color: var(--danger);
-  background: var(--danger-weak);
-  border-color: var(--danger);
+  background: var(--ocean-12);
+  border-color: var(--ocean);
+  color: var(--ocean);
 }
+.state-unhandled::before {
+  background: var(--ocean);
+}
+
+/* in_progress（対応中）= sand */
 .state-in_progress {
-  color: var(--accent);
-  background: var(--accent-weak);
-  border-color: var(--accent);
+  background: var(--sand-weak);
+  border-color: var(--sand);
+  color: var(--ocean);
 }
+.state-in_progress::before {
+  background: var(--sand);
+}
+
+/* done（完了）= leaf */
 .state-done {
-  color: var(--success);
-  background: var(--success-weak);
-  border-color: var(--success);
+  background: var(--leaf-weak);
+  border-color: var(--leaf);
+  color: var(--ocean);
 }
+.state-done::before {
+  background: var(--leaf);
+}
+
+/* snoozed（保留）= sage */
 .state-snoozed {
-  color: var(--warning);
-  background: var(--warning-weak);
-  border-color: var(--warning);
+  background: var(--sage-weak);
+  border-color: var(--sage);
+  color: var(--ocean);
 }
+.state-snoozed::before {
+  background: var(--sage);
+}
+
+/* dismissed（対象外）= sage 退色: opacity .6 で「盤面から外れた」質感 */
 .state-dismissed {
-  color: var(--text-muted);
-  background: var(--bg);
-  border-color: var(--border);
+  background: var(--sage-weak);
+  border-color: var(--sage);
+  color: var(--ocean);
+  opacity: 0.6;
+}
+.state-dismissed::before {
+  background: var(--sage);
 }
 </style>

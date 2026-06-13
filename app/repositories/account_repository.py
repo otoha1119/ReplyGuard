@@ -56,6 +56,7 @@ class AccountRepository:
                     "credential": r.credential,  # 既存キー — 残す
                     "auth_type": r.auth_type or "imap",
                     "refresh_token": r.refresh_token,
+                    "access_token": r.access_token,
                     "auth_status": r.auth_status or "ok",
                 }
                 for r in rows
@@ -106,6 +107,48 @@ class AccountRepository:
             created_at=now,
         )
         with self._session_factory() as session:
+            session.add(orm)
+            session.commit()
+            return AccountConfig(
+                id=orm.id, provider=orm.provider, label=orm.label,
+                address=orm.address, auth_type=orm.auth_type, auth_status=orm.auth_status,
+                created_at=orm.created_at,
+            )
+
+    def upsert_github_oauth(
+        self, *, label: str, address: str, access_token: str, scopes: str,
+    ) -> AccountConfig:
+        """GitHub アカウントを upsert（既存なら上書き、なければ作成）."""
+        stmt = select(AccountConfigORM).where(AccountConfigORM.provider == "github")
+        with self._session_factory() as session:
+            row = session.execute(stmt).scalars().first()
+            if row is not None:
+                row.label = label
+                row.address = address
+                row.access_token = access_token
+                row.scopes = scopes
+                row.auth_status = "ok"
+                session.commit()
+                return AccountConfig(
+                    id=row.id, provider=row.provider, label=row.label,
+                    address=row.address, auth_type=row.auth_type, auth_status=row.auth_status,
+                    created_at=row.created_at,
+                )
+            now = _utcnow_naive()
+            orm = AccountConfigORM(
+                id=str(uuid.uuid4()),
+                provider="github",
+                label=label,
+                address=address,
+                credential="",
+                auth_type="oauth",
+                refresh_token="",
+                access_token=access_token,
+                token_expiry=None,
+                scopes=scopes,
+                auth_status="ok",
+                created_at=now,
+            )
             session.add(orm)
             session.commit()
             return AccountConfig(

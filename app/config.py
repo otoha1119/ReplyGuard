@@ -16,7 +16,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         # 後の file が前を上書き（app.env が gmail.env を上書き）. 欠損ファイルは無視.
-        env_file=("secrets/gmail.env", "secrets/app.env"),
+        env_file=("secrets/gmail.env", "secrets/github.env", "secrets/app.env"),
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     gmail_oauth_client_secret: str = ""
     gmail_oauth_redirect_uri:  str = "http://127.0.0.1:8000/auth/gmail/callback"
     frontend_url:              str = "http://localhost:5173"
+
+    # === GitHub（取得・正規化層 / OAuth App）===
+    # OAuth App（classic）の web flow. notifications scope のみ要求（読み取り専用は運用規律で担保）.
+    github_oauth_client_id:     str = ""
+    github_oauth_client_secret: str = ""
+    github_oauth_redirect_uri:  str = "http://127.0.0.1:8000/auth/github/callback"
 
     # === DB（永続化層）===
     # 既定はローカル SQLite（追加アカウント不要）. Supabase/Postgres に上げる時は
