@@ -18,6 +18,7 @@ const props = withDefaults(
 const emit = defineEmits<{
   (e: "change-state", state: MessageState): void;
   (e: "unarchive"): void;
+  (e: "feedback-applied", patch: Partial<import("../types").AnalysisResult>): void;
 }>();
 
 const STATE_LABELS: Record<MessageState, string> = {
@@ -123,6 +124,12 @@ async function sendFeedback() {
   try {
     await submitFeedback(props.record.message_id, fbForm.value);
     feedbackDone.value = true;
+    emit("feedback-applied", {
+      importance: fbForm.value.importance,
+      request_type: fbForm.value.request_type,
+      is_promotional: fbForm.value.is_promotional,
+      is_security_notification: fbForm.value.is_security_notification,
+    });
     setTimeout(() => { feedbackOpen.value = false; feedbackDone.value = false; }, 1500);
   } catch (e) {
     feedbackError.value = e instanceof Error ? e.message : "送信に失敗しました";

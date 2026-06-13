@@ -21,6 +21,7 @@ from app.analysis.prompt import SYSTEM_INSTRUCTION, build_user_content
 from app.analysis.stub import StubAnalyzer
 from app.models import AnalysisResult, EmailMessage
 from app.ports.analyzer import Analyzer
+from app.ports.vector_store import FeedbackEntry
 
 logger = logging.getLogger(__name__)
 
@@ -125,10 +126,45 @@ class LLMAnalyzer:
         self._base_url = base_url  # OpenAI 互換サーバ（Ollama 等）の base url
         self._client = client  # テストでモック注入 / None なら遅延生成
         self._fallback: Analyzer = fallback or StubAnalyzer()
+        # フィードバック学習（configure_feedback で後から注入）
+        self._fb_embedding: Any | None = None
+        self._fb_vector_store: Any | None = None
+        self._fb_top_k: int = 3
+        self._fb_threshold: float = 0.5
+
+    def configure_feedback(
+        self,
+        embedding: Any,
+        vector_store: Any,
+        top_k: int = 3,
+        distance_threshold: float = 0.5,
+    ) -> None:
+        """フィードバック検索コンポーネントを注入する（起動時に main.py から呼ぶ）."""
+        self._fb_embedding = embedding
+        self._fb_vector_store = vector_store
+        self._fb_top_k = top_k
+        self._fb_threshold = distance_threshold
+
+    def _retrieve_feedback(self, email: EmailMessage) -> list[FeedbackEntry]:
+        """類似フィードバックを検索して閾値フィルタ後のリストを返す."""
+        if self._fb_embedding is None or self._fb_vector_store is None:
+            return []
+        try:
+            embed_text = f"{email.subject}\n{email.sender}\n{email.snippet}"
+            vector = self._fb_embedding.embed(embed_text)
+            entries = self._fb_vector_store.query_similar(vector, self._fb_top_k)
+            filtered = [e for e in entries if e.distance <= self._fb_threshold]
+            if entries and not filtered:
+                logger.debug("フィードバック: 最近傍距離=%.3f > 閾値=%.3f のため注入なし", entries[0].distance, self._fb_threshold)
+            return filtered
+        except Exception as exc:
+            logger.warning("フィードバック取得失敗（続行）: %s", type(exc).__name__)
+            return []
 
     def analyze(self, email: EmailMessage) -> AnalysisResult:
+        feedback_entries = self._retrieve_feedback(email)
         try:
-            raw = self._call(email)
+            raw = self._call(email, feedback_entries)
             data = self._parse(raw)
             data["analyzer"] = self.provider
             return AnalysisResult(**data)
@@ -140,8 +176,8 @@ class LLMAnalyzer:
             )
             return self._fallback.analyze(email)
 
-    def _call(self, email: EmailMessage) -> str:
-        content = build_user_content(email, self.max_body_chars)
+    def _call(self, email: EmailMessage, feedback_entries: list[FeedbackEntry] | None = None) -> str:
+        content = build_user_content(email, self.max_body_chars, feedback_entries or [])
         if self.provider == "anthropic":
             return self._call_anthropic(content)
         if self.provider == "openai":

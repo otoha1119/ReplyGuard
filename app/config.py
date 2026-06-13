@@ -74,6 +74,14 @@ class Settings(BaseSettings):
     # 本文をLLMへ渡す際の最大文字数（コスト/漏洩面の上限）
     llm_max_body_chars: int = 4000
 
+    # === フィードバック学習（Chroma + Ollama embedding） ===
+    # ollama_base_url が設定されている場合に有効. 未設定ならフィードバック機能は無効.
+    ollama_embed_model: str = "bge-m3"
+    chroma_path: str = "./data/chroma"
+    feedback_top_k: int = 3
+    # コサイン距離の閾値（0=完全一致, 1=無関係）. これ以上遠いFBはプロンプトに含めない.
+    feedback_distance_threshold: float = 0.5
+
     # === リモート削除/アーカイブ追随同期 ===
     sync_remote_changes: bool = True
     auto_archive_importance_threshold: int = 3

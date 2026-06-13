@@ -115,6 +115,16 @@ async function onChangeState(
   }
 }
 
+function onFeedbackApplied(record: MessageRecord, patch: Partial<import("./types").AnalysisResult>): void {
+  const idx = records.value.findIndex((r) => r.message_id === record.message_id);
+  if (idx !== -1 && records.value[idx].analysis) {
+    records.value[idx] = {
+      ...records.value[idx],
+      analysis: { ...records.value[idx].analysis!, ...patch },
+    };
+  }
+}
+
 async function onUnarchive(record: MessageRecord): Promise<void> {
   setBusy(record.message_id, true);
   error.value = null;
@@ -347,6 +357,7 @@ onUnmounted(() => { stopAutoRefresh(); });
           :mode="activeTab"
           @change-state="(s) => onChangeState(r, s)"
           @unarchive="onUnarchive(r)"
+          @feedback-applied="(patch) => onFeedbackApplied(r, patch)"
         />
       </div>
     </main>

@@ -13,11 +13,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.api.auth import authenticate, create_access_token
 from app.api.deps import (
     AuthDep,
+    get_feedback_service,
     get_ingestion,
     get_repo,
     get_settings,
     get_state_service,
 )
+from app.services.feedback_service import FeedbackService
 from app.api.schemas import (
     IngestResult,
     LoginRequest,
@@ -170,26 +172,19 @@ def trigger_ingest(
 def submit_feedback(
     message_id: str,
     body: FeedbackCorrection,
+    svc: FeedbackService | None = Depends(get_feedback_service),
     repo: Repository = Depends(get_repo),
 ) -> None:
-    """ユーザーによる分析結果の修正を受け取る.
+    """ユーザーによる分析結果の修正をベクトル DB に保存する.
 
-    現時点ではログのみ。次フェーズでベクトルDBへの保存を追加する.
+    OLLAMA_BASE_URL 未設定の場合は 503 を返す.
     """
-    record = repo.get(message_id)
-    if record is None:
+    if svc is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="メッセージが見つかりません",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="フィードバック機能は無効です（OLLAMA_BASE_URL を設定してください）",
         )
-    import logging
-    logger = logging.getLogger(__name__)
-    logger.info(
-        "フィードバック受信: message_id=%s importance=%d request_type=%s",
-        message_id,
-        body.importance,
-        body.request_type,
-    )
+    svc.submit(message_id, body)
 
 
 @router.post("/auth/login", response_model=TokenResponse, tags=["auth"])
