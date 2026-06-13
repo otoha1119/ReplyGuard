@@ -102,6 +102,45 @@ def test_list_recent_spam_messages_marked_is_spam() -> None:
     assert emails[0].subject == "迷惑件名"
 
 
+def test_list_recent_total_capped_at_limit() -> None:
+    """INBOX + SPAM の合計が limit を超える場合, limit 件に絞る."""
+    src, _ = _make_source()
+    mock_service = MagicMock()
+
+    def list_side_effect(*, userId, maxResults, labelIds):
+        messages = [{"id": f"{labelIds[0]}-{i}"} for i in range(3)]
+        r = MagicMock()
+        r.execute.return_value = {"messages": messages}
+        return r
+
+    def get_side_effect(*, userId, id, format):
+        r = MagicMock()
+        r.execute.return_value = {
+            "id": id,
+            "snippet": "",
+            "labelIds": [],
+            "payload": {
+                "mimeType": "text/plain",
+                "headers": [
+                    {"name": "Subject", "value": id},
+                    {"name": "From", "value": "x@example.com"},
+                    {"name": "To", "value": "me@gmail.com"},
+                    {"name": "Date", "value": "Fri, 13 Jun 2026 12:00:00 +0000"},
+                ],
+                "body": {"data": ""},
+            },
+        }
+        return r
+
+    mock_service.users.return_value.messages.return_value.list.side_effect = list_side_effect
+    mock_service.users.return_value.messages.return_value.get.side_effect = get_side_effect
+
+    with patch.object(src, "_build_service", return_value=mock_service):
+        emails = src.list_recent(limit=4)
+
+    assert len(emails) == 4
+
+
 def test_list_recent_refresh_error_sets_reauth_required() -> None:
     src, mock_repo = _make_source()
     with patch.object(

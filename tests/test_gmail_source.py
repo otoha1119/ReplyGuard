@@ -321,3 +321,15 @@ def test_empty_spam_folder_returns_only_inbox() -> None:
 
     assert len(result) == 1
     assert result[0].is_spam is False
+
+
+def test_list_recent_total_capped_at_limit() -> None:
+    """INBOX + 迷惑メールの合計が limit を超える場合, limit 件に絞る."""
+    inbox_items = [_fetch_item(i, _mime(subject=f"受信{i}"), seen=False) for i in range(1, 4)]
+    spam_items = [_fetch_item(i, _mime(subject=f"迷惑{i}"), seen=False) for i in range(4, 7)]
+    imap = _make_imap_mock(inbox_items, spam_items=spam_items)
+
+    with patch("app.adapters.sources.gmail_imap.imaplib.IMAP4_SSL", return_value=imap):
+        result = GmailImapSource("user@gmail.com", "pw").list_recent(limit=4)
+
+    assert len(result) == 4

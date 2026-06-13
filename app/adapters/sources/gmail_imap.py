@@ -23,6 +23,7 @@ import email.message
 import imaplib
 import logging
 import re
+from datetime import datetime, timezone
 from email.header import decode_header, make_header
 from email.utils import parsedate_to_datetime
 
@@ -34,6 +35,16 @@ logger = logging.getLogger(__name__)
 
 SNIPPET_LIMIT = 120  # snippet（プレビュー）の最大文字数
 DEFAULT_SPAM_MAILBOX = "[Gmail]/Spam"  # \Junk が見つからない場合のフォールバック名
+
+_MIN_DT = datetime.min.replace(tzinfo=timezone.utc)
+
+
+def _dt_key(m: EmailMessage) -> datetime:
+    """received_at を UTC aware datetime に正規化するソートキー（None は最古扱い）."""
+    dt = m.received_at
+    if dt is None:
+        return _MIN_DT
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
 
 
 def _decode(value: str | None) -> str:
@@ -233,11 +244,12 @@ class GmailImapSource:
         return DEFAULT_SPAM_MAILBOX
 
     def list_recent(self, limit: int = 10) -> list[EmailMessage]:
-        """受信トレイ + 迷惑メールフォルダの最新メールを新しい順で返す（読み取り専用）.
+        """受信トレイ + 迷惑メールフォルダを received_at 降順でマージし limit 件返す（読み取り専用）.
 
         Gmail が誤って迷惑メールへ振り分けたメールも分析対象に含めるため,
         INBOX に加えて迷惑メールフォルダも取得し is_spam=True で返す.
         迷惑メールフォルダの取得に失敗しても INBOX の結果は返す（継続）.
+        両フォルダの結果を received_at で降順マージし, 合計が limit を超えないよう切り詰める.
         """
         imap = self._connect()
         try:
@@ -249,7 +261,8 @@ class GmailImapSource:
             except Exception:
                 logger.exception("迷惑メールフォルダの取得に失敗（継続）")
 
-            return results
+            results.sort(key=_dt_key, reverse=True)
+            return results[:limit]
         finally:
             try:
                 imap.logout()

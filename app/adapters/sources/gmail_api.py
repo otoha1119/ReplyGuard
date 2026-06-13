@@ -26,6 +26,16 @@ logger = logging.getLogger(__name__)
 _TOKEN_URI = "https://oauth2.googleapis.com/token"
 _SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
+_MIN_DT = datetime.min.replace(tzinfo=timezone.utc)
+
+
+def _dt_key(m: "EmailMessage") -> datetime:
+    """received_at を UTC aware datetime に正規化するソートキー（None は最古扱い）."""
+    dt = m.received_at
+    if dt is None:
+        return _MIN_DT
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
 
 class GmailApiSource:
     def __init__(
@@ -77,7 +87,8 @@ class GmailApiSource:
                     logger.exception(
                         "メール取得失敗 (id=%s, account=%s)", m["id"], self._account_id
                     )
-        return results
+        results.sort(key=_dt_key, reverse=True)
+        return results[:limit]
 
     def detect_changes(
         self, start_cursor: str | None
