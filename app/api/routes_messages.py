@@ -54,6 +54,9 @@ def list_messages(
     importance_min: int | None = Query(default=None, ge=1, le=6),
     received_after: datetime | None = Query(default=None),
     received_before: datetime | None = Query(default=None),
+    email_categories: list[str] = Query(default=[]),
+    is_promotional: bool | None = Query(default=None),
+    is_security_notification: bool | None = Query(default=None),
     repo: Repository = Depends(get_repo),
 ) -> list[MessageRecord]:
     q = MessageQuery(
@@ -69,6 +72,9 @@ def list_messages(
         importance_min=importance_min,
         received_after=received_after,
         received_before=received_before,
+        email_categories=email_categories,
+        is_promotional=is_promotional,
+        is_security_notification=is_security_notification,
     )
     return repo.query(q)
 

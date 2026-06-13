@@ -28,6 +28,14 @@ _SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
 _MIN_DT = datetime.min.replace(tzinfo=timezone.utc)
 
+# Gmail API のカテゴリラベル → email_category 値のマッピング.
+_CATEGORY_LABEL_MAP = {
+    "CATEGORY_PROMOTIONS": "promotion",
+    "CATEGORY_SOCIAL": "social",
+    "CATEGORY_UPDATES": "update",
+    "CATEGORY_FORUMS": "forum",
+}
+
 
 def _dt_key(m: "EmailMessage") -> datetime:
     """received_at を UTC aware datetime に正規化するソートキー（None は最古扱い）."""
@@ -189,6 +197,11 @@ class GmailApiSource:
             except Exception:
                 pass
 
+        label_ids = msg.get("labelIds", [])
+        email_category = next(
+            (_CATEGORY_LABEL_MAP[lbl] for lbl in label_ids if lbl in _CATEGORY_LABEL_MAP),
+            "primary",
+        )
         return EmailMessage(
             id=message_id,
             provider="gmail",
@@ -197,9 +210,10 @@ class GmailApiSource:
             to=[t.strip() for t in headers.get("to", "").split(",") if t.strip()],
             received_at=received_at,
             snippet=msg.get("snippet", "")[:200],
-            is_unread="UNREAD" in msg.get("labelIds", []),
+            is_unread="UNREAD" in label_ids,
             body_text=body[: self._max_body_chars] if body else None,
             is_spam=is_spam,
+            email_category=email_category,
         )
 
     def _extract_body(self, payload: dict) -> str:

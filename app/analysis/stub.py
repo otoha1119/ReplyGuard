@@ -51,6 +51,32 @@ PROMO_KEYWORDS = (
     "広告",
 )
 
+# セキュリティ通知系の語（ログイン・パスワード・2FA 等）.
+SECURITY_KEYWORDS = (
+    "セキュリティ",
+    "ログイン",
+    "サインイン",
+    "パスワード",
+    "2段階認証",
+    "二段階認証",
+    "認証コード",
+    "確認コード",
+    "不審なアクティビティ",
+    "不正アクセス",
+    "アカウント保護",
+    "security",
+    "login",
+    "sign-in",
+    "signin",
+    "password",
+    "two-factor",
+    "2fa",
+    "verification code",
+    "suspicious",
+    "unauthorized",
+    "account alert",
+)
+
 # 本文長（文字数）で task_weight を素朴に推定する閾値.
 _HEAVY_BODY_CHARS = 800
 
@@ -116,6 +142,7 @@ class StubAnalyzer:
 
         urgent_hits = [k for k in URGENT_KEYWORDS if k.lower() in haystack]
         promo_hits = [k for k in PROMO_KEYWORDS if k.lower() in haystack]
+        security_hits = [k for k in SECURITY_KEYWORDS if k.lower() in haystack]
 
         # 重要度: 基準 3 から, 締切/対応系で加点, 宣伝/通知系で減点, 1-6 にクランプ.
         importance = 3
@@ -129,6 +156,7 @@ class StubAnalyzer:
 
         needs_reply = bool(urgent_hits)
         is_promotional = bool(promo_hits and not urgent_hits)
+        is_security_notification = bool(security_hits)
 
         if needs_reply:
             request_type = "reply_required"
@@ -167,6 +195,7 @@ class StubAnalyzer:
             task_weight=task_weight,
             request_type=request_type,
             is_promotional=is_promotional,
+            is_security_notification=is_security_notification,
             summary=_summarize(subject, body),
             suggested_action=suggested_action,
             deadline=deadline,

@@ -28,6 +28,9 @@ class MessageQuery:
     importance_min: int | None = None
     received_after: datetime | None = None
     received_before: datetime | None = None
+    email_categories: list[str] = field(default_factory=list)       # 空なら全カテゴリ
+    is_promotional: bool | None = None                               # None=絞り込みなし
+    is_security_notification: bool | None = None                     # None=絞り込みなし
 
 
 @runtime_checkable
