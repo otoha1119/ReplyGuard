@@ -27,6 +27,7 @@ class EmailMessage(BaseModel):
     snippet: str = ""             # 本文先頭のプレビュー
     is_unread: bool = False
     body_text: str | None = None  # LLM 入力用の本文(先頭のみ・任意追加フィールド)
+    is_spam: bool = False          # 取得元プロバイダが迷惑メールに分類していたか(任意追加フィールド)
 
 
 # 対応区分（LLM が抽出するファクト）.

@@ -10,6 +10,7 @@ export interface EmailMessage {
   snippet: string;
   is_unread: boolean;
   body_text: string | null;
+  is_spam: boolean;
 }
 
 export type TaskWeight = "light" | "medium" | "heavy";

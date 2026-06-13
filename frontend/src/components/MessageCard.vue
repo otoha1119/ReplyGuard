@@ -134,6 +134,12 @@ const nextStates = computed(() =>
       </div>
 
       <div class="tags">
+        <span
+          v-if="email.is_spam"
+          class="tag spam"
+          title="Gmail が迷惑メールに分類していました"
+          >⚠️ 迷惑メール</span
+        >
         <span v-if="requestTypeLabel" class="tag">{{ requestTypeLabel }}</span>
         <span v-if="weightLabel" class="tag weight">負荷 {{ weightLabel }}</span>
         <span v-if="analysis?.request_type === 'reply_required'" class="tag reply">要返信</span>
@@ -309,6 +315,11 @@ const nextStates = computed(() =>
   color: var(--accent);
   border-color: var(--accent);
   background: var(--accent-weak);
+}
+.tag.spam {
+  color: var(--danger);
+  background: var(--danger-weak);
+  border-color: var(--danger);
 }
 .tag.triage {
   color: var(--text-muted);

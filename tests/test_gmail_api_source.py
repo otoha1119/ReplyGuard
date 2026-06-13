@@ -27,12 +27,7 @@ def test_list_recent_maps_to_email_messages() -> None:
     src, _ = _make_source()
     mock_service = MagicMock()
 
-    # messages.list
-    mock_service.users.return_value.messages.return_value.list.return_value.execute.return_value = {
-        "messages": [{"id": "msg1"}]
-    }
-    # messages.get
-    mock_service.users.return_value.messages.return_value.get.return_value.execute.return_value = {
+    get_msg = {
         "id": "msg1",
         "snippet": "テストスニペット",
         "labelIds": ["INBOX", "UNREAD"],
@@ -48,6 +43,16 @@ def test_list_recent_maps_to_email_messages() -> None:
         },
     }
 
+    # INBOX のみ 1 件, SPAM は空にして重複を防ぐ.
+    def list_side_effect(*, userId, maxResults, labelIds):
+        messages = [{"id": "msg1"}] if labelIds == ["INBOX"] else []
+        result = MagicMock()
+        result.execute.return_value = {"messages": messages}
+        return result
+
+    mock_service.users.return_value.messages.return_value.list.side_effect = list_side_effect
+    mock_service.users.return_value.messages.return_value.get.return_value.execute.return_value = get_msg
+
     with patch.object(src, "_build_service", return_value=mock_service):
         emails = src.list_recent(limit=1)
 
@@ -56,6 +61,45 @@ def test_list_recent_maps_to_email_messages() -> None:
     assert emails[0].is_unread is True
     assert emails[0].provider == "gmail"
     assert emails[0].sender == "sender@example.com"
+    assert emails[0].is_spam is False
+
+
+def test_list_recent_spam_messages_marked_is_spam() -> None:
+    """SPAM ラベルで取得したメールは is_spam=True になる."""
+    src, _ = _make_source()
+    mock_service = MagicMock()
+
+    spam_msg = {
+        "id": "spam1",
+        "snippet": "迷惑スニペット",
+        "labelIds": ["SPAM"],
+        "payload": {
+            "mimeType": "text/plain",
+            "headers": [
+                {"name": "Subject", "value": "迷惑件名"},
+                {"name": "From", "value": "spam@evil.example"},
+                {"name": "To", "value": "me@gmail.com"},
+                {"name": "Date", "value": "Fri, 13 Jun 2026 12:00:00 +0000"},
+            ],
+            "body": {"data": "c3BhbQ=="},  # "spam" の base64
+        },
+    }
+
+    def list_side_effect(*, userId, maxResults, labelIds):
+        messages = [{"id": "spam1"}] if labelIds == ["SPAM"] else []
+        result = MagicMock()
+        result.execute.return_value = {"messages": messages}
+        return result
+
+    mock_service.users.return_value.messages.return_value.list.side_effect = list_side_effect
+    mock_service.users.return_value.messages.return_value.get.return_value.execute.return_value = spam_msg
+
+    with patch.object(src, "_build_service", return_value=mock_service):
+        emails = src.list_recent(limit=1)
+
+    assert len(emails) == 1
+    assert emails[0].is_spam is True
+    assert emails[0].subject == "迷惑件名"
 
 
 def test_list_recent_refresh_error_sets_reauth_required() -> None:

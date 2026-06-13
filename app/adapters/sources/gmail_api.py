@@ -50,7 +50,11 @@ class GmailApiSource:
         return ""
 
     def list_recent(self, limit: int = 10) -> list[EmailMessage]:
-        """Gmail API v1 で受信トレイを取得して EmailMessage のリストを返す（読み取り専用）．"""
+        """Gmail API v1 で受信トレイ + 迷惑メールを取得して EmailMessage のリストを返す（読み取り専用）．
+
+        Gmail が誤って迷惑メールへ振り分けたメールも分析対象に含めるため,
+        INBOX に加えて SPAM ラベルのメールも取得し is_spam=True で返す.
+        """
         try:
             service = self._build_service()
         except google.auth.exceptions.RefreshError:
@@ -58,21 +62,21 @@ class GmailApiSource:
             self._account_repo.set_auth_status(self._account_id, "reauth_required")
             raise
 
-        resp = (
-            service.users()
-            .messages()
-            .list(userId="me", maxResults=limit, labelIds=["INBOX"])
-            .execute()
-        )
-        messages = resp.get("messages", [])
         results = []
-        for m in messages:
-            try:
-                results.append(self._fetch_message(service, m["id"]))
-            except Exception:
-                logger.exception(
-                    "メール取得失敗 (id=%s, account=%s)", m["id"], self._account_id
-                )
+        for label, is_spam in (("INBOX", False), ("SPAM", True)):
+            resp = (
+                service.users()
+                .messages()
+                .list(userId="me", maxResults=limit, labelIds=[label])
+                .execute()
+            )
+            for m in resp.get("messages", []):
+                try:
+                    results.append(self._fetch_message(service, m["id"], is_spam=is_spam))
+                except Exception:
+                    logger.exception(
+                        "メール取得失敗 (id=%s, account=%s)", m["id"], self._account_id
+                    )
         return results
 
     def detect_changes(
@@ -155,7 +159,7 @@ class GmailApiSource:
         creds.refresh(Request())
         return build("gmail", "v1", credentials=creds)
 
-    def _fetch_message(self, service, message_id: str) -> EmailMessage:
+    def _fetch_message(self, service, message_id: str, *, is_spam: bool = False) -> EmailMessage:
         msg = (
             service.users()
             .messages()
@@ -184,6 +188,7 @@ class GmailApiSource:
             snippet=msg.get("snippet", "")[:200],
             is_unread="UNREAD" in msg.get("labelIds", []),
             body_text=body[: self._max_body_chars] if body else None,
+            is_spam=is_spam,
         )
 
     def _extract_body(self, payload: dict) -> str:
