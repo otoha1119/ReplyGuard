@@ -68,20 +68,39 @@ const ICONS: Record<string, string> = {
   pointer-events: none;
 }
 
+/* ── ガラス化トースト ── */
 .toast {
   pointer-events: all;
   display: flex;
   flex-direction: column;
-  border-radius: var(--radius);
-  border: 1px solid;
-  box-shadow: var(--shadow-lg);
+  /* .glass はグローバルに定義済み．scoped 内で上書き・補完する */
+  border-radius: var(--radius-sm);
   font-size: 13px;
   font-weight: 500;
   min-width: 260px;
   max-width: 380px;
-  backdrop-filter: blur(4px);
   overflow: hidden;
+  will-change: transform, opacity;
+  /* glass ユーティリティの値を直接展開（グローバル .glass は scoped に届かないため） */
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-highlight), var(--glass-hairline), var(--glass-shadow);
+  isolation: isolate;
+  position: relative;
 }
+
+/* 鏡面ハイライト（::after は ::before と干渉しないよう before に振る） */
+.toast::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(to bottom, rgba(255,255,255,0.40) 0%, rgba(255,255,255,0.06) 22%, transparent 50%);
+  pointer-events: none;
+  z-index: 0;
+}
+.toast > * { position: relative; z-index: 1; }
 
 .toast-body {
   display: flex;
@@ -90,16 +109,45 @@ const ICONS: Record<string, string> = {
   padding: 11px 14px 11px 12px;
 }
 
-.toast--info    { background: var(--surface);       border-color: var(--brand-blue); color: var(--brand-blue); }
-.toast--success { background: var(--success-weak);  border-color: var(--success);    color: var(--success); }
-.toast--error   { background: var(--danger-weak);   border-color: var(--danger);     color: var(--danger); }
-.toast--warn    { background: var(--warning-weak);  border-color: var(--warning);    color: var(--warning); }
+/*
+ * 種別色はガラス地 + 左枠（border-left）＋アイコン色で示す．
+ * 文字は常に ocean．ガラス面は明サーフェスなので ocean が読める．
+ */
+
+/* info: ocean 左枠 1px + ocean アイコン */
+.toast--info {
+  border-left: 3px solid var(--ocean);
+  color: var(--ocean);
+}
+/* success: leaf 左枠 + leaf アイコン（文字は ocean） */
+.toast--success {
+  border-left: 3px solid var(--leaf);
+  color: var(--ocean);
+}
+/* warn: sand 左枠 + sand アイコン（文字は ocean） */
+.toast--warn {
+  border-left: 3px solid var(--sand);
+  color: var(--ocean);
+}
+/* error: ocean 太枠 2px + ocean 文字 + weight600（赤なし） */
+.toast--error {
+  border-left: 5px solid var(--ocean);
+  color: var(--ocean);
+  font-weight: 600;
+}
+
+/* アイコン色を種別ごとに調整（文字 currentColor から切り離す） */
+.toast--info    .toast-icon { color: var(--ocean); }
+.toast--success .toast-icon { color: var(--leaf); }
+.toast--warn    .toast-icon { color: var(--sand); }
+.toast--error   .toast-icon { color: var(--ocean); }
 
 .toast-icon { flex-shrink: 0; }
 
 .toast-msg {
   flex: 1;
   line-height: 1.45;
+  color: var(--ocean);
 }
 
 .toast-action {
@@ -109,7 +157,7 @@ const ICONS: Record<string, string> = {
   font-size: inherit;
   font-weight: 600;
   cursor: pointer;
-  color: currentColor;
+  color: var(--ocean);
   text-decoration: underline;
   text-underline-offset: 2px;
   white-space: nowrap;
@@ -120,18 +168,24 @@ const ICONS: Record<string, string> = {
   border: none;
   padding: 2px;
   cursor: pointer;
-  color: currentColor;
+  color: var(--ocean);
   opacity: 0.5;
   display: flex;
   align-items: center;
+  border-radius: 50%;
+  transition: opacity var(--dur-fast) var(--ease-standard),
+              background var(--dur-fast) var(--ease-standard);
 }
-.toast-close:hover { opacity: 1; }
+.toast-close:hover {
+  opacity: 1;
+  background: var(--ocean-12);
+}
 
-/* Progress bar */
+/* Progress bar: ocean 固定（種別を問わず ocean で統一・薄くならないように） */
 .toast-progress {
   height: 3px;
-  background: currentColor;
-  opacity: 0.35;
+  background: var(--ocean);
+  opacity: 0.5;
   transform-origin: left;
   animation: toast-shrink linear forwards;
 }
@@ -141,19 +195,34 @@ const ICONS: Record<string, string> = {
   to   { transform: scaleX(0); }
 }
 
-/* Slide in from bottom */
+/*
+ * 出入りアニメーション
+ * 入場: 下から spring（弾む）
+ * 退場: 下へ滑らか（--ease-out-expo を逆用）
+ * easing は styles.css 定義のトークンに従う
+ */
 .toast-enter-active {
-  transition: transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.2s ease;
+  transition:
+    transform var(--dur-base) var(--ease-spring),
+    opacity 200ms var(--ease-standard);
 }
 .toast-leave-active {
-  transition: transform 0.2s ease-in, opacity 0.2s ease;
+  transition:
+    transform var(--dur-base) var(--ease-out-expo),
+    opacity var(--dur-base) var(--ease-out-expo);
+}
+.toast-move {
+  transition: transform var(--dur-base) var(--ease-out-expo);
 }
 .toast-enter-from {
-  transform: translateY(120%);
+  transform: translateY(110%) scale(0.95);
   opacity: 0;
 }
 .toast-leave-to {
-  transform: translateY(120%);
+  transform: translateY(110%) scale(0.95);
   opacity: 0;
+}
+.toast-leave-active {
+  position: absolute;
 }
 </style>
