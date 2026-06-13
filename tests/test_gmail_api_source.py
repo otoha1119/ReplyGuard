@@ -44,7 +44,7 @@ def test_list_recent_maps_to_email_messages() -> None:
     }
 
     # INBOX のみ 1 件, SPAM は空にして重複を防ぐ.
-    def list_side_effect(*, userId, maxResults, labelIds):
+    def list_side_effect(*, userId, maxResults, labelIds, includeSpamTrash=False):
         messages = [{"id": "msg1"}] if labelIds == ["INBOX"] else []
         result = MagicMock()
         result.execute.return_value = {"messages": messages}
@@ -85,7 +85,7 @@ def test_list_recent_spam_messages_marked_is_spam() -> None:
         },
     }
 
-    def list_side_effect(*, userId, maxResults, labelIds):
+    def list_side_effect(*, userId, maxResults, labelIds, includeSpamTrash=False):
         messages = [{"id": "spam1"}] if labelIds == ["SPAM"] else []
         result = MagicMock()
         result.execute.return_value = {"messages": messages}
@@ -107,7 +107,7 @@ def test_list_recent_total_capped_at_limit() -> None:
     src, _ = _make_source()
     mock_service = MagicMock()
 
-    def list_side_effect(*, userId, maxResults, labelIds):
+    def list_side_effect(*, userId, maxResults, labelIds, includeSpamTrash=False):
         messages = [{"id": f"{labelIds[0]}-{i}"} for i in range(3)]
         r = MagicMock()
         r.execute.return_value = {"messages": messages}

@@ -77,7 +77,7 @@ class GmailApiSource:
             resp = (
                 service.users()
                 .messages()
-                .list(userId="me", maxResults=limit, labelIds=[label])
+                .list(userId="me", maxResults=limit, labelIds=[label], includeSpamTrash=is_spam)
                 .execute()
             )
             for m in resp.get("messages", []):
