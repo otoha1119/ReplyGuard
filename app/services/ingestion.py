@@ -3,6 +3,10 @@
 IngestionService は AccountRepository からアカウントを取得し, プロバイダごとに
 ソースを動的に構築してメールを取得する. 1 通の失敗で全体を落とさず, 個別に
 握り込んでログへ残す（観測性）. 本文全文はログ・例外詳細に出さない（LLM02）.
+
+分析（LLM）は 1 メールにつき生涯 1 回だけ呼ぶ: 既に analysis を持つ既存レコードは
+保存済み結果を再利用し, LLM を再呼び出ししない（従量課金の抑制）. 期限に依存する
+triage/urgency スコアは純粋関数で安価なため, 毎サイクル now で再計算する.
 """
 
 import logging
@@ -35,9 +39,14 @@ class IngestionService:
         self._repo = repo
         self._notifier = notifier
         self._settings = settings
+        # テスト用のソース注入口. セットされていれば DB/env 由来の構築を完全に置き換える
+        # （実 Gmail/Slack を叩かずオフライン e2e できるようにするため）.
+        self._sources_override: list | None = None
 
     def _build_sources(self) -> list:
         """DB アカウントからソースを構築. なければ env 変数のフォールバックを試みる."""
+        if self._sources_override is not None:
+            return self._sources_override
         accounts = self._account_repo.list_for_ingest()
         sources = []
         for acc in accounts:
@@ -99,10 +108,15 @@ class IngestionService:
         for email, source_address in email_source_pairs:
             message_id = MessageRecord.make_id(email.provider, email.id)
             try:
-                analysis = self._analyzer.analyze(email)
+                existing = self._repo.get(message_id)
+                # 分析は「生涯 1 回」: 既に分析済みなら結果を再利用し LLM を呼ばない
+                # （従量課金の抑制）. スコアは now 依存のため毎回ローカルで再計算する（無料）.
+                if existing is not None and existing.analysis is not None:
+                    analysis = existing.analysis
+                else:
+                    analysis = self._analyzer.analyze(email)
                 urgency = compute_urgency_score(analysis, now)
                 score = compute_triage_score(analysis, now)
-                existing = self._repo.get(message_id)
                 record = MessageRecord(
                     message_id=message_id,
                     email=email,
