@@ -100,10 +100,10 @@
   /* ── モーション（Apple 級の定番値） ── */
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
-  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
-  --dur-fast: 140ms;
-  --dur-base: 280ms;
-  --dur-slow: 420ms;
+  --ease-spring: cubic-bezier(0.32, 1.42, 0.50, 1);   /* 弾みを控えめに（オーバーシュート約半分） */
+  --dur-fast: 240ms;
+  --dur-base: 560ms;
+  --dur-slow: 920ms;
 }
 
 * { box-sizing: border-box; }
@@ -222,10 +222,10 @@ button { font: inherit; cursor: pointer; }
 /* ══════════════════════════════════════════════════════════
    View Transitions（タブ・ルート遷移）
    ══════════════════════════════════════════════════════════ */
-::view-transition-old(root) { animation: 280ms var(--ease-out-expo) both vt-out; }
-::view-transition-new(root) { animation: 320ms var(--ease-out-expo) both vt-in; }
-@keyframes vt-out { to { opacity: 0; transform: translateY(-10px) scale(0.99); } }
-@keyframes vt-in  { from { opacity: 0; transform: translateY(12px) scale(0.99); } }
+::view-transition-old(root) { animation: 520ms var(--ease-out-expo) both vt-out; }
+::view-transition-new(root) { animation: 820ms var(--ease-spring) both vt-in; }
+@keyframes vt-out { to { opacity: 0; transform: translateY(-22px) scale(0.97); } }
+@keyframes vt-in  { from { opacity: 0; transform: translateY(34px) scale(0.95); } }
 
 /* ══════════════════════════════════════════════════════════
    汎用アニメーション・ユーティリティ
@@ -246,8 +246,8 @@ button { font: inherit; cursor: pointer; }
 .lift:hover { transform: translateY(-3px); }
 
 /* 入場フェードアップ */
-@keyframes fade-up { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
-@keyframes pop-in  { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: scale(1); } }
+@keyframes fade-up { from { opacity: 0; transform: translateY(34px) scale(0.95); } to { opacity: 1; transform: none; } }
+@keyframes pop-in  { from { opacity: 0; transform: scale(0.82) translateY(10px); } to { opacity: 1; transform: scale(1); } }
 
 /* ══════════════════════════════════════════════════════════
    reduced-motion 全停止（0msでイベント発火を保つ）

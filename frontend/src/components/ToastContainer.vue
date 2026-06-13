@@ -161,6 +161,14 @@ const ICONS: Record<string, string> = {
   text-decoration: underline;
   text-underline-offset: 2px;
   white-space: nowrap;
+  transition: transform var(--dur-fast) var(--ease-spring);
+}
+.toast-action:hover {
+  transform: translateY(-1px) scale(1.03);
+}
+.toast-action:active {
+  transform: scale(0.94);
+  transition-duration: 80ms;
 }
 .toast-close {
   flex-shrink: 0;
@@ -173,12 +181,19 @@ const ICONS: Record<string, string> = {
   display: flex;
   align-items: center;
   border-radius: 50%;
-  transition: opacity var(--dur-fast) var(--ease-standard),
-              background var(--dur-fast) var(--ease-standard);
+  transition:
+    opacity var(--dur-fast) var(--ease-standard),
+    background var(--dur-fast) var(--ease-standard),
+    transform var(--dur-fast) var(--ease-spring);
 }
 .toast-close:hover {
   opacity: 1;
   background: var(--ocean-12);
+  transform: scale(1.15);
+}
+.toast-close:active {
+  transform: scale(0.9);
+  transition-duration: 80ms;
 }
 
 /* Progress bar: ocean 固定（種別を問わず ocean で統一・薄くならないように） */
@@ -197,16 +212,17 @@ const ICONS: Record<string, string> = {
 
 /*
  * 出入りアニメーション
- * 入場: 下から spring（弾む）
- * 退場: 下へ滑らか（--ease-out-expo を逆用）
+ * 入場: 下から spring で弾みながら登場（scale も伴う）
+ * 退場: 左へフェードしながら縮小（out-expo で自然に）
  * easing は styles.css 定義のトークンに従う
  */
 .toast-enter-active {
   transition:
     transform var(--dur-base) var(--ease-spring),
-    opacity 200ms var(--ease-standard);
+    opacity var(--dur-fast) var(--ease-out-expo);
 }
 .toast-leave-active {
+  position: absolute;
   transition:
     transform var(--dur-base) var(--ease-out-expo),
     opacity var(--dur-base) var(--ease-out-expo);
@@ -215,14 +231,22 @@ const ICONS: Record<string, string> = {
   transition: transform var(--dur-base) var(--ease-out-expo);
 }
 .toast-enter-from {
-  transform: translateY(110%) scale(0.95);
+  transform: translateY(20px) scale(0.92);
   opacity: 0;
 }
 .toast-leave-to {
-  transform: translateY(110%) scale(0.95);
+  transform: translateX(-16px) scale(0.96);
   opacity: 0;
 }
-.toast-leave-active {
-  position: absolute;
+
+/* アイコン pop 登場（toast 入場に連動した軽い scale bounce） */
+@keyframes icon-pop {
+  from { transform: scale(0.6); opacity: 0; }
+  70%  { transform: scale(1.18); }
+  to   { transform: scale(1); opacity: 1; }
+}
+.toast-enter-active .toast-icon {
+  animation: icon-pop var(--dur-base) var(--ease-spring) both;
+  animation-delay: 60ms;
 }
 </style>

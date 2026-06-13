@@ -63,12 +63,17 @@ const DOTS: Record<number, [number, number][]> = {
 .imp-5 { color: var(--imp-5); }
 .imp-6 { color: var(--imp-6); }
 
-/* レベル4以上: hover でふわっと拡大（弾みeasing） */
-.imp-4,
-.imp-5,
-.imp-6 {
+/* 全レベル: hover でふわっと拡大（spring で弾ませる） */
+.imp {
   transition: transform var(--dur-base) var(--ease-spring);
 }
+/* レベル1〜3: ほんのり lift */
+.imp-1:hover,
+.imp-2:hover,
+.imp-3:hover {
+  transform: scale(1.08);
+}
+/* レベル4〜6: より大きく pop（既存値 1.18 を維持） */
 .imp-4:hover,
 .imp-5:hover,
 .imp-6:hover {

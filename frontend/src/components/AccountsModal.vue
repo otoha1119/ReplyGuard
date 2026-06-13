@@ -234,6 +234,7 @@ onMounted(() => { void loadAccounts(); });
           </div>
 
           <!-- Inline connect form -->
+          <Transition name="expand">
           <div v-if="expandedProvider === p.id" class="connect-form">
             <p v-if="formError" class="banner err" role="alert">{{ formError }}</p>
 
@@ -282,6 +283,7 @@ onMounted(() => { void loadAccounts(); });
               </div>
             </template>
           </div>
+          </Transition>
         </div>
       </div>
     </div>
@@ -326,7 +328,7 @@ onMounted(() => { void loadAccounts(); });
     var(--glass-hairline),
     0 24px 64px rgba(4, 157, 191, 0.20),
     0 6px 16px rgba(4, 157, 191, 0.10) !important;
-  animation: pop-in var(--dur-base) var(--ease-spring) both;
+  animation: pop-in-modal var(--dur-base) var(--ease-spring) both;
 }
 
 /* ── ヘッダー: .glass--ocean（濃ガラス＋白タイトル） ── */
@@ -366,11 +368,17 @@ onMounted(() => { void loadAccounts(); });
   border-radius: var(--radius-pill);
   transition:
     color var(--dur-fast) var(--ease-standard),
-    background var(--dur-fast) var(--ease-standard);
+    background var(--dur-fast) var(--ease-standard),
+    transform var(--dur-fast) var(--ease-spring);
 }
 .close-btn:hover {
   color: var(--white);
   background: rgba(255, 255, 255, 0.18);
+  transform: scale(1.15);
+}
+.close-btn:active {
+  transform: scale(0.9);
+  transition-duration: 80ms;
 }
 
 /* ── Provider list ── */
@@ -392,7 +400,12 @@ onMounted(() => { void loadAccounts(); });
   background: rgba(255, 255, 255, 0.72);
   transition:
     border-color var(--dur-fast) var(--ease-standard),
-    box-shadow var(--dur-fast) var(--ease-standard);
+    box-shadow var(--dur-fast) var(--ease-standard),
+    transform var(--dur-fast) var(--ease-out-expo);
+}
+.provider-row:hover:not(.expanded) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(4, 157, 191, 0.10);
 }
 .provider-row.expanded {
   border-color: var(--ocean);
@@ -500,7 +513,15 @@ onMounted(() => { void loadAccounts(); });
   transition:
     background var(--dur-fast) var(--ease-standard),
     border-color var(--dur-fast) var(--ease-standard),
-    color var(--dur-fast) var(--ease-standard);
+    color var(--dur-fast) var(--ease-standard),
+    transform var(--dur-fast) var(--ease-spring);
+}
+.action-btn:hover {
+  transform: scale(1.15);
+}
+.action-btn:active {
+  transform: scale(0.9);
+  transition-duration: 80ms;
 }
 /* + ボタン: ocean 枠 + ocean 文字 → hover/active で ocean 塗り＋白 */
 .connect-btn {
@@ -560,12 +581,14 @@ onMounted(() => { void loadAccounts(); });
   background: rgba(255, 255, 255, 0.75);
   color: var(--ocean);
   outline: none;
-  transition: border-color var(--dur-fast) var(--ease-standard);
+  box-shadow: 0 0 0 0px var(--ocean-12);
+  transition:
+    border-color var(--dur-fast) var(--ease-standard),
+    box-shadow var(--dur-base) var(--ease-out-expo);
 }
 .input:focus {
   border-color: var(--ocean);
-  outline: 3px solid var(--ocean-12);
-  outline-offset: 1px;
+  box-shadow: 0 0 0 3px var(--ocean-12);
 }
 
 .form-footer {
@@ -591,8 +614,12 @@ onMounted(() => { void loadAccounts(); });
 }
 .btn-primary:hover:not(:disabled) {
   background: var(--ocean-72);
-  transform: translateY(-2px);
+  transform: translateY(-1px) scale(1.03);
   box-shadow: var(--glass-shadow-hover);
+}
+.btn-primary:active:not(:disabled) {
+  transform: scale(0.94);
+  transition-duration: 80ms;
 }
 .btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }
 
@@ -615,8 +642,12 @@ onMounted(() => { void loadAccounts(); });
 }
 .oauth-btn:hover:not(:disabled) {
   background: var(--ocean-72);
-  transform: translateY(-2px);
+  transform: translateY(-1px) scale(1.03);
   box-shadow: var(--glass-shadow-hover);
+}
+.oauth-btn:active:not(:disabled) {
+  transform: scale(0.94);
+  transition-duration: 80ms;
 }
 .oauth-btn:disabled { opacity: 0.55; cursor: not-allowed; }
 
@@ -649,15 +680,58 @@ onMounted(() => { void loadAccounts(); });
 }
 
 /* ── <Transition name="modal-fade"> ── */
+/*
+ * オーバーレイ: opacity のみ（レイアウト変更なし）
+ * 入場: out-expo で滑らか・退場: standard で自然に消える
+ * カード自体は pop-in @keyframes（scale + opacity）で入場
+ */
 .modal-fade-enter-active {
   transition: opacity var(--dur-base) var(--ease-out-expo);
 }
 .modal-fade-leave-active {
-  transition: opacity var(--dur-base) var(--ease-out-expo);
+  transition: opacity var(--dur-base) var(--ease-standard);
 }
 .modal-fade-enter-from,
 .modal-fade-leave-to {
   opacity: 0;
 }
-/* カード自体は pop-in animation で入場（オーバーレイのフェードと合成） */
+
+/* pop-in を spring + out-expo ブレンドに変更（scale + translateY） */
+@keyframes pop-in-modal {
+  from {
+    opacity: 0;
+    transform: scale(0.90) translateY(12px);
+  }
+  60% {
+    opacity: 1;
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* ── <Transition name="expand"> アコーディオン展開 ── */
+/*
+ * height ではなく opacity + translateY で実装（レイアウトプロパティ禁止）
+ * 展開：spring で少し弾む，折りたたみ：out-expo で素直に消える
+ */
+.expand-enter-active {
+  transition:
+    opacity var(--dur-base) var(--ease-spring),
+    transform var(--dur-base) var(--ease-spring);
+}
+.expand-leave-active {
+  transition:
+    opacity var(--dur-fast) var(--ease-standard),
+    transform var(--dur-fast) var(--ease-standard);
+}
+.expand-enter-from {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+.expand-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
 </style>

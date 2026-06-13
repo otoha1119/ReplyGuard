@@ -39,6 +39,15 @@ const label = computed(() => LABELS[props.state]);
   white-space: nowrap;
   flex-shrink: 0;
   color: var(--ocean);
+  /* 状態色の遷移（background / border-color / color）を滑らかに */
+  transition:
+    background var(--dur-fast) var(--ease-out-expo),
+    border-color var(--dur-fast) var(--ease-out-expo),
+    color var(--dur-fast) var(--ease-out-expo),
+    transform var(--dur-fast) var(--ease-spring);
+}
+.state:hover {
+  transform: translateY(-1px) scale(1.03);
 }
 
 /* 色ドット（::before で疑似要素） */
@@ -49,6 +58,7 @@ const label = computed(() => LABELS[props.state]);
   height: 6px;
   border-radius: 50%;
   flex-shrink: 0;
+  transition: background var(--dur-fast) var(--ease-out-expo);
 }
 
 /* unhandled（未対応）= ocean: 最も目立つ・要対応 */

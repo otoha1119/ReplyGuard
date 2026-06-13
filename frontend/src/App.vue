@@ -1246,8 +1246,16 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease-out-expo),
+    transform var(--dur-fast) var(--ease-spring),
+    opacity var(--dur-fast) var(--ease-out-expo);
 }
-.search-clear:hover { color: var(--ocean); }
+.search-clear:hover {
+  color: var(--ocean);
+  transform: scale(1.15);
+}
+.search-clear:active { transform: scale(0.9); }
 
 .bar-right {
   display: flex;
@@ -1271,12 +1279,17 @@ onUnmounted(() => {
   line-height: 0;
   opacity: 0.9;
   border-radius: 50%;
-  transition: opacity 0.15s, box-shadow 0.15s;
+  transition:
+    opacity var(--dur-fast) var(--ease-out-expo),
+    box-shadow var(--dur-fast) var(--ease-out-expo),
+    transform var(--dur-fast) var(--ease-spring);
 }
 .accounts-btn:hover {
   opacity: 1;
   box-shadow: 0 0 0 3px var(--ocean-12);
+  transform: scale(1.1);
 }
+.accounts-btn:active { transform: scale(0.9); }
 
 /* ── Dropdown：ガラス化 ── */
 .dropdown {
@@ -1310,11 +1323,19 @@ onUnmounted(() => {
   border: none;
   text-align: left;
   cursor: pointer;
-  transition: background 0.12s;
+  transition:
+    background var(--dur-fast) var(--ease-out-expo),
+    transform var(--dur-fast) var(--ease-out-expo),
+    color var(--dur-fast) var(--ease-out-expo);
 }
 .dropdown-item:hover {
   background: rgba(228, 235, 242, 0.60);
+  transform: translateX(2px);
 }
+.dropdown-item:hover > svg:first-child {
+  transform: translateX(0);
+}
+.dropdown-item:active { transform: translateX(2px) scale(0.98); }
 .dropdown-item--danger {
   color: var(--ocean);
 }
@@ -1363,12 +1384,18 @@ onUnmounted(() => {
   gap: 6px;
   line-height: 36px;
   vertical-align: middle;
-  transition: background var(--dur-base) var(--ease-standard), box-shadow var(--dur-base) var(--ease-standard), transform var(--dur-base) var(--ease-standard);
+  transition:
+    background var(--dur-fast) var(--ease-out-expo),
+    box-shadow var(--dur-fast) var(--ease-out-expo),
+    transform var(--dur-fast) var(--ease-spring),
+    color var(--dur-fast) var(--ease-out-expo);
 }
 .ingest:hover:not(:disabled) {
   background: var(--ocean-72);
   box-shadow: var(--shadow-md);
+  transform: translateY(-2px) scale(1.02);
 }
+.ingest:active:not(:disabled) { transform: scale(0.97); }
 .ingest:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -1415,13 +1442,19 @@ onUnmounted(() => {
   border: none;
   border-radius: calc(var(--radius) - 4px);
   cursor: pointer;
-  transition: color var(--dur-fast) var(--ease-standard), background var(--dur-fast) var(--ease-standard);
+  transition:
+    color var(--dur-fast) var(--ease-out-expo),
+    background var(--dur-fast) var(--ease-out-expo),
+    transform var(--dur-fast) var(--ease-spring),
+    box-shadow var(--dur-fast) var(--ease-out-expo);
   position: relative;
 }
 .tab:hover {
   color: var(--ocean);
   background: rgba(255, 255, 255, 0.45);
+  transform: scale(1.03);
 }
+.tab:active { transform: scale(0.94); }
 .tab.active {
   color: var(--white);
   background: var(--ocean);
@@ -1459,11 +1492,17 @@ onUnmounted(() => {
   cursor: pointer;
   white-space: nowrap;
   opacity: 0.6;
+  transition:
+    opacity var(--dur-fast) var(--ease-out-expo),
+    color var(--dur-fast) var(--ease-out-expo),
+    transform var(--dur-fast) var(--ease-spring);
 }
 .density-btn:hover {
   opacity: 1;
   color: var(--ocean);
+  transform: scale(1.1);
 }
+.density-btn:active { transform: scale(0.9); }
 .chip {
   font-size: 12px;
   font-weight: 500;
@@ -1518,12 +1557,17 @@ onUnmounted(() => {
   cursor: pointer;
   opacity: 0.6;
   margin-bottom: 4px;
-  transition: opacity 0.15s, color 0.15s;
+  transition:
+    opacity var(--dur-fast) var(--ease-out-expo),
+    color var(--dur-fast) var(--ease-out-expo),
+    transform var(--dur-fast) var(--ease-spring);
 }
 .sidebar-toggle:hover {
   opacity: 1;
   color: var(--ocean);
+  transform: scale(1.05);
 }
+.sidebar-toggle:active { transform: scale(0.95); }
 
 .sidebar-content {
   overflow: hidden;
@@ -1566,11 +1610,19 @@ onUnmounted(() => {
   justify-content: center;
   cursor: pointer;
   z-index: 500;
+  transition:
+    background var(--dur-fast) var(--ease-out-expo),
+    color var(--dur-fast) var(--ease-out-expo),
+    transform var(--dur-fast) var(--ease-spring),
+    box-shadow var(--dur-fast) var(--ease-out-expo);
 }
 .scroll-top-btn:hover {
   background: var(--ocean) !important;
   color: var(--white);
+  transform: translateY(-2px) scale(1.1);
+  box-shadow: 0 6px 20px rgba(4, 157, 191, 0.30);
 }
+.scroll-top-btn:active { transform: scale(0.9); }
 .scroll-top-enter-active, .scroll-top-leave-active {
   transition: opacity var(--dur-fast) var(--ease-standard), transform var(--dur-fast) var(--ease-standard);
 }
@@ -1638,14 +1690,22 @@ onUnmounted(() => {
   background: rgba(255, 255, 255, 0.60);
   color: var(--ocean);
   cursor: pointer;
-  transition: border-color 0.12s, color 0.12s, background 0.12s;
+  transition:
+    border-color var(--dur-fast) var(--ease-out-expo),
+    color var(--dur-fast) var(--ease-out-expo),
+    background var(--dur-fast) var(--ease-out-expo),
+    transform var(--dur-fast) var(--ease-spring),
+    box-shadow var(--dur-fast) var(--ease-out-expo);
   white-space: nowrap;
 }
 .bulk-btn:hover {
   border-color: var(--ocean);
   background: var(--ocean);
   color: var(--white);
+  transform: translateY(-1px) scale(1.03);
+  box-shadow: 0 3px 10px rgba(4, 157, 191, 0.22);
 }
+.bulk-btn:active { transform: scale(0.94); }
 /* ocean（デフォルト＝アーカイブ・未対応） */
 .bulk-btn--ocean { color: var(--ocean); border-color: var(--ocean); background: var(--ocean-12); }
 .bulk-btn--ocean:hover { background: var(--ocean); color: var(--white); }
@@ -1688,11 +1748,26 @@ onUnmounted(() => {
   padding: 3px 7px;
   cursor: pointer;
   margin: -3px -7px;
-  transition: border-color 0.12s, background 0.12s;
+  transition:
+    border-color var(--dur-fast) var(--ease-out-expo),
+    background var(--dur-fast) var(--ease-out-expo),
+    transform var(--dur-fast) var(--ease-spring),
+    box-shadow var(--dur-fast) var(--ease-out-expo);
 }
 .stat-btn:hover {
   border-color: var(--border);
   background: rgba(255, 255, 255, 0.45);
+  transform: scale(1.04);
+}
+.stat-btn:active { transform: scale(0.94); }
+/* 選択時のポップ */
+.stat-btn--active {
+  animation: stat-pop var(--dur-fast) var(--ease-spring);
+}
+@keyframes stat-pop {
+  0%   { transform: scale(1); }
+  50%  { transform: scale(1.08); }
+  100% { transform: scale(1); }
 }
 
 /* 未対応ヒーロー stat（件数があれば ocean 淡地で強調） */
@@ -1878,25 +1953,30 @@ onUnmounted(() => {
   gap: var(--gap);
 }
 
-/* TransitionGroup FLIP */
-.list-move,
-.list-enter-active,
-.list-leave-active {
-  transition: all 350ms var(--ease-out-expo);
+/* TransitionGroup FLIP（ゆっくり浮き出てくる＝ヌルヌル） */
+.list-move {
+  transition: transform 1800ms var(--ease-out-expo);
 }
-.list-enter-from,
-.list-leave-to {
-  opacity: 0;
-  transform: translateY(16px);
+.list-enter-active {
+  transition: opacity 2000ms var(--ease-out-expo), transform 2000ms var(--ease-spring);
 }
 .list-leave-active {
+  transition: opacity 520ms var(--ease-out-expo), transform 520ms var(--ease-out-expo);
   position: absolute;
   width: 100%;
 }
+.list-enter-from {
+  opacity: 0;
+  transform: translateY(23px) scale(0.96);
+}
+.list-leave-to {
+  opacity: 0;
+  transform: translateX(-30px) scale(0.94);
+}
 
-/* stagger：--i CSS 変数で出現を遅延 */
+/* stagger：--i CSS 変数で出現を遅延（ゆったり順番に） */
 .list-enter-active {
-  transition-delay: calc(var(--i, 0) * 40ms);
+  transition-delay: calc(var(--i, 0) * 90ms);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1945,9 +2025,17 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   border-radius: var(--radius-sm);
-  transition: color 0.12s, background 0.12s;
+  transition:
+    color var(--dur-fast) var(--ease-out-expo),
+    background var(--dur-fast) var(--ease-out-expo),
+    transform var(--dur-fast) var(--ease-spring);
 }
-.shortcuts-close:hover { color: var(--ocean); background: rgba(228, 235, 242, 0.60); }
+.shortcuts-close:hover {
+  color: var(--ocean);
+  background: rgba(228, 235, 242, 0.60);
+  transform: scale(1.15);
+}
+.shortcuts-close:active { transform: scale(0.9); }
 
 .shortcuts-body {
   padding: 12px 16px 16px;

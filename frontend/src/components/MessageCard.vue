@@ -413,8 +413,8 @@ function onArchive() {
   flex-direction: column;
   gap: 10px;
   transition:
-    box-shadow var(--dur-base) var(--ease-standard),
-    transform var(--dur-base) var(--ease-standard);
+    box-shadow var(--dur-base) var(--ease-out-expo),
+    transform var(--dur-base) var(--ease-spring);
   position: relative;
   will-change: transform;
 }
@@ -443,10 +443,13 @@ function onArchive() {
 .card--slack.glass   { border-color: var(--sand); }  /* Slack → 黄 */
 .card--outlook.glass { border-color: var(--sage); }  /* Outlook → 鼠 */
 
-/* hover：色も影も変えず，持ち上がりモーションだけ（白いまま） */
+/* hover：派手に弾んで持ち上がる（枠/影は出さず・白いまま） */
 .card:hover {
   box-shadow: none;
-  transform: translateY(-3px);
+  transform: translateY(-7px) scale(1.015);
+}
+.card:active {
+  transform: translateY(-2px) scale(0.995);
 }
 
 .card.compact {
@@ -520,7 +523,7 @@ function onArchive() {
   font-weight: 700;
   color: var(--white);
   letter-spacing: 0.02em;
-  transition: opacity var(--dur-fast) var(--ease-standard);
+  transition: opacity var(--dur-fast) var(--ease-spring);
 }
 .avatar-check {
   position: absolute;
@@ -532,7 +535,10 @@ function onArchive() {
   align-items: center;
   justify-content: center;
   opacity: 0;
-  transition: opacity var(--dur-fast) var(--ease-standard);
+  transition:
+    opacity var(--dur-fast) var(--ease-spring),
+    background var(--dur-fast) var(--ease-out-expo),
+    border-color var(--dur-fast) var(--ease-out-expo);
   color: var(--white);
 }
 .avatar-check.checked {
@@ -705,6 +711,10 @@ function onArchive() {
   border: 1px solid var(--sage);
   border-radius: var(--radius-pill);
   padding: 2px 9px;
+  transition: transform var(--dur-fast) var(--ease-spring);
+}
+.tag:hover {
+  transform: translateY(-1px) scale(1.03);
 }
 
 /* 要返信: ocean 強調（ocean-12地＋ocean枠＋ocean文字＋weight600） */
@@ -766,6 +776,12 @@ function onArchive() {
   color: var(--text-muted);
   opacity: 0.45;
   user-select: none;
+  transition: transform var(--dur-base) var(--ease-spring);
+}
+/* expanded 状態のアイコン: 上向き矢印は SVG points で制御済み．
+   scale でほんのり pop して切り替えを知覚しやすくする */
+.card.expanded .expand-icon {
+  transform: scale(1.05);
 }
 
 /* ── アクション行 ── */
@@ -795,20 +811,20 @@ function onArchive() {
   background: rgba(255, 255, 255, 0.55);
   color: var(--text-muted);
   transition:
-    border-color var(--dur-fast) var(--ease-standard),
-    background var(--dur-fast) var(--ease-standard),
-    color var(--dur-fast) var(--ease-standard),
-    transform var(--dur-fast) var(--ease-standard);
+    border-color var(--dur-fast) var(--ease-out-expo),
+    background var(--dur-fast) var(--ease-out-expo),
+    color var(--dur-fast) var(--ease-out-expo),
+    transform var(--dur-fast) var(--ease-spring);
   white-space: nowrap;
 }
 .act:hover:not(:disabled) {
   border-color: var(--ocean);
   color: var(--ocean);
   background: var(--ocean-12);
-  transform: scale(1.04);
+  transform: translateY(-1px) scale(1.03);
 }
 .act:active:not(:disabled) {
-  transform: scale(0.97);
+  transform: scale(0.94);
 }
 .act:disabled {
   opacity: 0.45;
@@ -844,9 +860,15 @@ function onArchive() {
   background: var(--ocean-12);
 }
 
-/* ⋯ オーバーフロートリガー */
+/* ⋯ オーバーフロートリガー（アイコンボタン: scale のみ） */
 .act--overflow {
   padding: 4px 8px;
+}
+.act--overflow:hover:not(:disabled) {
+  transform: scale(1.15);
+}
+.act--overflow:active:not(:disabled) {
+  transform: scale(0.9);
 }
 
 /* ── オーバーフローメニュー ── */
@@ -883,13 +905,18 @@ function onArchive() {
   color: var(--text-muted);
   text-align: left;
   transition:
-    background var(--dur-fast) var(--ease-standard),
-    color var(--dur-fast) var(--ease-standard);
+    background var(--dur-fast) var(--ease-out-expo),
+    color var(--dur-fast) var(--ease-out-expo),
+    transform var(--dur-fast) var(--ease-spring);
   white-space: nowrap;
 }
 .menu-item:hover:not(:disabled) {
   background: var(--ocean-12);
   color: var(--ocean);
+  transform: translateY(-1px) scale(1.03);
+}
+.menu-item:active:not(:disabled) {
+  transform: scale(0.94);
 }
 .menu-item--active {
   color: var(--ocean);
@@ -905,21 +932,21 @@ function onArchive() {
   cursor: not-allowed;
 }
 
-/* ── メニュー出現アニメーション ── */
+/* ── メニュー出現アニメーション（fade + translateY/scale, out-expo） ── */
 .menu-enter-active {
+  transition:
+    opacity var(--dur-fast) var(--ease-out-expo),
+    transform var(--dur-fast) var(--ease-spring);
+}
+.menu-leave-active {
   transition:
     opacity var(--dur-fast) var(--ease-out-expo),
     transform var(--dur-fast) var(--ease-out-expo);
 }
-.menu-leave-active {
-  transition:
-    opacity var(--dur-fast) var(--ease-standard),
-    transform var(--dur-fast) var(--ease-standard);
-}
 .menu-enter-from,
 .menu-leave-to {
   opacity: 0;
-  transform: translateY(6px) scale(0.96);
+  transform: translateY(6px) scale(0.94);
 }
 
 /* ── 検索ハイライト: sand地＋ocean文字（黄色禁止） ── */
@@ -930,21 +957,21 @@ function onArchive() {
   padding: 0 1px;
 }
 
-/* ── 展開アニメーション（max-height + opacity） ── */
+/* ── 展開アニメーション（opacity + transform, out-expo で統一） ── */
 .expand-enter-active {
   transition:
     opacity var(--dur-base) var(--ease-out-expo),
-    transform var(--dur-base) var(--ease-out-expo);
+    transform var(--dur-base) var(--ease-spring);
 }
 .expand-leave-active {
   transition:
-    opacity var(--dur-fast) var(--ease-standard),
-    transform var(--dur-fast) var(--ease-standard);
+    opacity var(--dur-fast) var(--ease-out-expo),
+    transform var(--dur-fast) var(--ease-out-expo);
 }
 .expand-enter-from,
 .expand-leave-to {
   opacity: 0;
-  transform: translateY(-6px) scaleY(0.96);
+  transform: translateY(-6px) scaleY(0.94);
   transform-origin: top;
 }
 </style>

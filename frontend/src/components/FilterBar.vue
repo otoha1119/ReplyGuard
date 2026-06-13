@@ -648,9 +648,15 @@ const groupedAccounts = computed(() => {
   text-decoration: underline;
   text-underline-offset: 2px;
   flex-shrink: 0;
+  transition: opacity var(--dur-fast) var(--ease-out-expo),
+              transform 120ms var(--ease-spring);
 }
 .clear-all-btn:hover {
   opacity: 0.75;
+  transform: scale(1.05);
+}
+.clear-all-btn:active {
+  transform: scale(0.94);
 }
 
 /* summary-bar トランジション */
@@ -688,21 +694,27 @@ const groupedAccounts = computed(() => {
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-out-expo),
               color var(--dur-fast) var(--ease-out-expo),
-              transform 100ms var(--ease-spring);
+              box-shadow var(--dur-fast) var(--ease-out-expo),
+              transform 120ms var(--ease-spring);
   white-space: nowrap;
 }
 .sort-btn:hover:not(.sort-btn--active) {
   background: var(--ocean-08);
   color: var(--ocean);
+  transform: translateY(-1px) scale(1.03);
 }
 .sort-btn:active {
-  transform: scale(0.95);
+  transform: scale(0.94) !important;
 }
 .sort-btn--active {
   background: var(--ocean);
   color: var(--white);
   font-weight: 700;
   box-shadow: 0 2px 8px var(--ocean-20);
+}
+/* 選択の瞬間にポップ（active→selected 遷移）は transform が spring で担う */
+.sort-btn--active:not(:active) {
+  transform: translateY(-1px) scale(1.02);
 }
 
 .sort-dir-badge {
@@ -726,19 +738,29 @@ const groupedAccounts = computed(() => {
   cursor: pointer;
   white-space: nowrap;
   transition: background var(--dur-fast) var(--ease-out-expo),
-              transform 100ms var(--ease-spring);
+              transform 120ms var(--ease-spring),
+              box-shadow var(--dur-fast) var(--ease-out-expo);
 }
 .dir-toggle:hover {
   background: var(--ocean-12);
+  transform: translateY(-1px) scale(1.03);
+  box-shadow: 0 3px 8px var(--ocean-12);
 }
 .dir-toggle:active {
-  transform: scale(0.95);
+  transform: scale(0.94) !important;
+  box-shadow: none;
 }
 
 .dir-icon--desc,
 .dir-icon--asc {
   font-size: 14px;
   line-height: 1;
+  display: inline-block;
+  transition: transform var(--dur-base) var(--ease-out-expo);
+}
+/* 昇降切替：矢印をフリップで表現（rotate で direction を伝える） */
+.dir-icon--asc {
+  transform: rotate(180deg);
 }
 
 .dir-toggle-label {
@@ -809,17 +831,18 @@ const groupedAccounts = computed(() => {
   justify-content: center;
   transition: background var(--dur-fast) var(--ease-out-expo),
               border-color var(--dur-fast) var(--ease-out-expo),
-              transform 150ms var(--ease-spring),
+              transform 180ms var(--ease-spring),
               box-shadow var(--dur-fast) var(--ease-out-expo);
 }
-.dice-face:hover {
+.dice-face:hover:not(.dice-face--selected) {
   border-color: var(--ocean-20);
   background: var(--ocean-08);
-  transform: translateY(-2px) scale(1.06);
+  transform: translateY(-2px) scale(1.12);
   box-shadow: 0 6px 14px var(--ocean-12);
 }
 .dice-face:active {
-  transform: scale(0.94);
+  transform: scale(0.92) !important;
+  box-shadow: none !important;
 }
 
 /* 重要度ランプ — face ごとに pip 色が変わる */
@@ -836,12 +859,12 @@ const groupedAccounts = computed(() => {
   background: var(--ocean-08);
 }
 
-/* 選択されている面（=importanceMin） */
+/* 選択されている面（=importanceMin）— spring でポップしてから定位置に落ち着く */
 .dice-face--selected {
   background: var(--ocean) !important;
   border-color: var(--ocean) !important;
   box-shadow: 0 4px 12px var(--ocean-20);
-  transform: translateY(-3px) !important;
+  transform: translateY(-3px) scale(1.08) !important;
 }
 .dice-face--selected .pip { fill: var(--white) !important; }
 
@@ -888,14 +911,18 @@ const groupedAccounts = computed(() => {
   text-align: left;
   transition: background var(--dur-fast) var(--ease-out-expo),
               border-color var(--dur-fast) var(--ease-out-expo),
-              transform 100ms var(--ease-spring);
+              box-shadow var(--dur-fast) var(--ease-out-expo),
+              transform 120ms var(--ease-spring);
 }
 .date-chip:hover {
   background: var(--ocean-08);
   border-color: var(--ocean-20);
+  transform: translateY(-1px) scale(1.02);
+  box-shadow: 0 3px 8px var(--ocean-08);
 }
 .date-chip:active {
-  transform: scale(0.97);
+  transform: scale(0.97) !important;
+  box-shadow: none;
 }
 .date-chip--active {
   background: var(--ocean-12);
@@ -919,10 +946,17 @@ const groupedAccounts = computed(() => {
   cursor: pointer;
   line-height: 1;
   flex-shrink: 0;
-  transition: color var(--dur-fast);
+  transition: color var(--dur-fast) var(--ease-out-expo),
+              transform 120ms var(--ease-spring),
+              opacity var(--dur-fast) var(--ease-out-expo);
 }
 .chip-clear-btn:hover {
   color: var(--ocean);
+  transform: scale(1.12);
+  opacity: 0.85;
+}
+.chip-clear-btn:active {
+  transform: scale(0.9) !important;
 }
 
 /* ポップオーバー */
@@ -976,12 +1010,18 @@ const groupedAccounts = computed(() => {
   text-align: right;
   text-decoration: underline;
   text-underline-offset: 2px;
+  transition: opacity var(--dur-fast) var(--ease-out-expo),
+              transform 120ms var(--ease-spring);
 }
 .popover-close-btn:hover {
   opacity: 0.75;
+  transform: scale(1.05);
+}
+.popover-close-btn:active {
+  transform: scale(0.94);
 }
 
-/* ポップオーバー トランジション */
+/* ポップオーバー トランジション — fadeY(-4px→0)，out-expo */
 .popover-enter-active {
   animation: popover-in 150ms var(--ease-out-expo) both;
 }
@@ -991,11 +1031,11 @@ const groupedAccounts = computed(() => {
 @keyframes popover-in {
   from {
     opacity: 0;
-    transform: translateY(-6px) scale(0.97);
+    transform: translateY(-4px);
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translateY(0);
   }
 }
 
@@ -1015,14 +1055,19 @@ const groupedAccounts = computed(() => {
   align-self: flex-start;
   transition: background var(--dur-fast) var(--ease-out-expo),
               border-color var(--dur-fast) var(--ease-out-expo),
-              transform 100ms var(--ease-spring);
+              color var(--dur-fast) var(--ease-out-expo),
+              box-shadow var(--dur-fast) var(--ease-out-expo),
+              transform 120ms var(--ease-spring);
 }
 .toggle-chip:hover {
   background: var(--ocean-08);
   border-color: var(--ocean-20);
+  transform: translateY(-1px) scale(1.03);
+  box-shadow: 0 3px 8px var(--ocean-08);
 }
 .toggle-chip:active {
-  transform: scale(0.95);
+  transform: scale(0.94) !important;
+  box-shadow: none;
 }
 .toggle-chip--on {
   background: var(--ocean);
@@ -1053,7 +1098,8 @@ const groupedAccounts = computed(() => {
   height: 10px;
   border-radius: 50%;
   background: var(--sage);
-  transition: transform var(--dur-fast) var(--ease-spring),
+  /* spring で滑らかなサム移動（dur-base = 280ms で気持ちよい重さ） */
+  transition: transform var(--dur-base) var(--ease-spring),
               background var(--dur-fast) var(--ease-out-expo);
 }
 .toggle-chip--on .toggle-thumb {
@@ -1101,20 +1147,31 @@ const groupedAccounts = computed(() => {
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-out-expo),
               border-color var(--dur-fast) var(--ease-out-expo),
-              transform 100ms var(--ease-spring);
+              color var(--dur-fast) var(--ease-out-expo),
+              box-shadow var(--dur-fast) var(--ease-out-expo),
+              transform 120ms var(--ease-spring);
 }
 .account-chip:hover:not(.account-chip--active) {
   background: var(--ocean-08);
   border-color: var(--ocean-20);
+  transform: translateY(-1px) scale(1.03);
+  box-shadow: 0 3px 8px var(--ocean-08);
 }
 .account-chip:active {
-  transform: scale(0.95);
+  transform: scale(0.94) !important;
+  box-shadow: none;
 }
 .account-chip--active {
   background: var(--ocean);
   color: var(--white);
   border-color: var(--ocean);
   font-weight: 700;
+  /* 選択切替の瞬間にわずかな lift でポップ感を演出 */
+  transform: translateY(-1px);
+  box-shadow: 0 3px 10px var(--ocean-20);
+}
+.account-chip--active:hover {
+  transform: translateY(-2px) scale(1.03) !important;
 }
 
 /* chip-x（共通） */
@@ -1123,5 +1180,15 @@ const groupedAccounts = computed(() => {
   font-weight: 700;
   line-height: 1;
   opacity: 0.75;
+  display: inline-block;
+  transition: transform 120ms var(--ease-spring),
+              opacity var(--dur-fast) var(--ease-out-expo);
+}
+.account-chip:hover .chip-x {
+  transform: scale(1.2);
+  opacity: 1;
+}
+.account-chip:active .chip-x {
+  transform: scale(0.9);
 }
 </style>
