@@ -187,6 +187,7 @@ function capitalize(s: string): string {
     </div>
 
     <!-- フィルターパネル（折りたたみ） -->
+    <Transition name="pop">
     <div
       v-if="expanded"
       class="filter-panel"
@@ -294,150 +295,171 @@ function capitalize(s: string): string {
         </button>
       </div>
     </div>
+    </Transition>
   </div>
 </template>
 
 <style scoped>
 .filter-bar {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 8px 12px;
-  margin-bottom: 12px;
+  margin-bottom: var(--space-4);
 }
 
 .sort-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   flex-wrap: wrap;
 }
 
 .sort-controls {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
   flex: 1;
 }
 
 .ctrl-label,
 .group-label {
-  font-size: 12px;
-  color: var(--text-muted);
+  font-size: var(--text-12);
+  color: var(--ink-soft);
   white-space: nowrap;
 }
 
 .ctrl-select {
-  font-size: 13px;
-  padding: 4px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg);
-  color: var(--text);
+  font-size: var(--text-12);
+  padding: var(--space-1) var(--space-3);
+  border: 1.5px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--card);
+  color: var(--ink);
 }
 
 .dir-btn {
-  font-size: 14px;
-  width: 30px;
-  height: 28px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  color: var(--text);
+  font-size: var(--text-14);
+  width: 32px;
+  height: 32px;
+  border: 1.5px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--card);
+  color: var(--ink-soft);
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.1s;
+  transition: background var(--duration-micro) var(--ease-smooth),
+    color var(--duration-micro) var(--ease-smooth);
 }
 
 .dir-btn:hover {
-  background: var(--bg);
+  background: var(--card-inset);
+  color: var(--ink);
 }
 
 .filter-toggle-btn {
-  font-size: 13px;
-  padding: 4px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  color: var(--text);
+  font-size: var(--text-12);
+  font-weight: 500;
+  padding: var(--space-1) var(--space-4);
+  border: 1.5px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--card);
+  color: var(--ink-soft);
   display: flex;
   align-items: center;
-  gap: 6px;
-  transition: background 0.1s;
+  gap: var(--space-2);
+  transition: background var(--duration-micro) var(--ease-smooth),
+    color var(--duration-micro) var(--ease-smooth);
 }
 
 .filter-toggle-btn:hover {
-  background: var(--bg);
+  background: var(--card-inset);
+  color: var(--ink);
 }
 
 .filter-badge {
-  font-size: 11px;
+  font-size: var(--text-12);
   font-weight: 700;
-  background: var(--accent);
+  background: var(--ink);
   color: #fff;
-  border-radius: 999px;
-  padding: 1px 6px;
-  min-width: 16px;
+  border-radius: var(--radius-pill);
+  padding: 0 var(--space-2);
+  min-width: 18px;
   text-align: center;
 }
 
 .filter-panel {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
+  margin-top: var(--space-3);
+  padding: var(--space-4) var(--space-6);
+  background: var(--card);
+  border-radius: var(--radius-card);
+  box-shadow: var(--elev-1);
   display: flex;
   flex-wrap: wrap;
-  gap: 16px;
+  gap: var(--space-4) var(--space-6);
   align-items: flex-start;
+  transform-origin: top left;
+}
+
+/* パネルの弾む出現 */
+.pop-enter-active {
+  transition: opacity var(--duration-micro) var(--ease-spring),
+    transform var(--duration-micro) var(--ease-spring);
+}
+.pop-leave-active {
+  transition: opacity var(--duration-micro) var(--ease-smooth),
+    transform var(--duration-micro) var(--ease-smooth);
+}
+.pop-enter-from,
+.pop-leave-to {
+  opacity: 0;
+  transform: scale(0.96) translateY(-6px);
 }
 
 .filter-group {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 .checkbox-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 16px;
+  gap: var(--space-1) var(--space-4);
 }
 
 .check-item {
   display: flex;
   align-items: center;
-  gap: 5px;
-  font-size: 13px;
+  gap: var(--space-2);
+  font-size: var(--text-12);
+  color: var(--ink);
   cursor: pointer;
   user-select: none;
 }
 
 .check-item input[type="checkbox"] {
-  accent-color: var(--accent);
-  width: 14px;
-  height: 14px;
+  accent-color: var(--fl-cyan);
+  width: 15px;
+  height: 15px;
   cursor: pointer;
 }
 
 .date-range {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 .date-input {
-  font-size: 13px;
-  padding: 4px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg);
-  color: var(--text);
+  font-size: var(--text-12);
+  padding: var(--space-1) var(--space-3);
+  border: 1.5px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--card);
+  color: var(--ink);
 }
 
 .date-sep {
-  color: var(--text-muted);
-  font-size: 13px;
+  color: var(--ink-soft);
+  font-size: var(--text-12);
 }
 
 .filter-actions {
@@ -447,19 +469,21 @@ function capitalize(s: string): string {
 }
 
 .clear-btn {
-  font-size: 12px;
-  padding: 4px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  color: var(--text-muted);
-  transition: background 0.1s, color 0.1s, border-color 0.1s;
+  font-size: var(--text-12);
+  padding: var(--space-1) var(--space-4);
+  border: 1.5px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--ink-soft);
+  transition: background var(--duration-micro) var(--ease-smooth),
+    color var(--duration-micro) var(--ease-smooth),
+    border-color var(--duration-micro) var(--ease-smooth);
 }
 
 .clear-btn:hover:not(:disabled) {
-  background: var(--danger-weak);
-  color: var(--danger);
-  border-color: var(--danger);
+  color: var(--rose);
+  border-color: var(--rose);
+  background: var(--rose-tint);
 }
 
 .clear-btn:disabled {

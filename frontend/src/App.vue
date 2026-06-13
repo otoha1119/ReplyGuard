@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import type { MessageRecord, MessageState } from "./types";
 import {
   type MessagesQuery,
@@ -40,6 +40,61 @@ const archiveQuery = ref<MessagesQuery>({
 const unhandledCount = computed(
   () => records.value.filter((r) => r.state === "unhandled").length,
 );
+const needsReplyCount = computed(
+  () => records.value.filter((r) => r.analysis?.needs_reply).length,
+);
+const inProgressCount = computed(
+  () => records.value.filter((r) => r.state === "in_progress").length,
+);
+const snoozedCount = computed(
+  () => records.value.filter((r) => r.state === "snoozed").length,
+);
+
+// Signature: 未対応 × 重要度4以上だけが「いま見るべき」ゾーンへ（受信トレイのみ）
+const priorityRecords = computed(() =>
+  activeTab.value === "inbox"
+    ? records.value.filter(
+        (r) => r.state === "unhandled" && (r.analysis?.importance ?? 1) >= 4,
+      )
+    : [],
+);
+const standardRecords = computed(() => {
+  if (priorityRecords.value.length === 0) return records.value;
+  const ids = new Set(priorityRecords.value.map((r) => r.message_id));
+  return records.value.filter((r) => !ids.has(r.message_id));
+});
+
+// --- ヒーロー数字の count-up（JS アニメーション） ---
+const reducedMotion =
+  typeof window !== "undefined" &&
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const displayCount = ref(0);
+let countRaf: number | null = null;
+
+function animateCount(target: number): void {
+  if (reducedMotion) {
+    displayCount.value = target;
+    return;
+  }
+  if (countRaf !== null) cancelAnimationFrame(countRaf);
+  const start = displayCount.value;
+  const t0 = performance.now();
+  const duration = 700;
+  const tick = (t: number): void => {
+    const p = Math.min(1, (t - t0) / duration);
+    const eased = 1 - Math.pow(1 - p, 3);
+    displayCount.value = Math.round(start + (target - start) * eased);
+    countRaf = p < 1 ? requestAnimationFrame(tick) : null;
+  };
+  countRaf = requestAnimationFrame(tick);
+}
+
+watch(unhandledCount, (n) => animateCount(n));
+
+const tickerText = computed(
+  () =>
+    `REPLYGUARD ✦ INBOX STUDIO ✦ 未対応 ${unhandledCount.value} ✦ 要返信 ${needsReplyCount.value} ✦ 対応漏れゼロへ ✦ `,
+);
 
 async function load(): Promise<void> {
   loading.value = true;
@@ -66,6 +121,7 @@ function onQueryChange(q: MessagesQuery): void {
 async function switchTab(tab: Tab): Promise<void> {
   if (activeTab.value === tab) return;
   activeTab.value = tab;
+  records.value = [];
   await load();
 }
 
@@ -171,6 +227,10 @@ function onAccountsChanged(): void {
   void load();
 }
 
+function stagger(index: number): { transitionDelay: string } {
+  return { transitionDelay: `${Math.min(index, 10) * 40}ms` };
+}
+
 onMounted(() => {
   void load();
   getProviders()
@@ -180,59 +240,75 @@ onMounted(() => {
   startAutoRefresh();
 });
 
-onUnmounted(() => { stopAutoRefresh(); });
+onUnmounted(() => {
+  stopAutoRefresh();
+  if (countRaf !== null) cancelAnimationFrame(countRaf);
+});
 </script>
 
 <template>
-  <div class="app">
-    <header class="bar">
-      <div class="brand">
-        <span class="logo">ReplyGuard</span>
-        <span class="tag-line">受信トレイ管制塔</span>
+  <!-- 背景のドリフトするブロブ（ギャラリーの滲み） -->
+  <div class="blobs" aria-hidden="true">
+    <div class="blob b1" />
+    <div class="blob b2" />
+    <div class="blob b3" />
+  </div>
+
+  <!-- マーキーティッカー -->
+  <div class="ticker" aria-hidden="true">
+    <div class="ticker-track">
+      <span class="ticker-text">{{ tickerText.repeat(3) }}</span>
+      <span class="ticker-text">{{ tickerText.repeat(3) }}</span>
+    </div>
+  </div>
+
+  <div class="studio">
+    <header class="hero">
+      <div class="hero-id">
+        <h1 class="wordmark">Reply<em>Guard</em></h1>
+        <p class="tagline">受信トレイ 仕分けスタジオ</p>
       </div>
-      <div class="bar-right">
-        <span
-          v-if="activeTab === 'inbox'"
-          class="counter"
-          :class="{ alert: unhandledCount > 0 }"
-        >
-          未対応 {{ unhandledCount }}
-        </span>
-        <button
-          type="button"
-          class="accounts-btn"
-          @click="showAccounts = true"
-        >
+      <div class="hero-actions">
+        <button type="button" class="pill ghost" @click="showAccounts = true">
           アカウント
         </button>
         <button
           type="button"
-          class="auto-refresh-btn"
-          :class="{ active: autoRefresh }"
+          class="pill ghost"
+          :class="{ on: autoRefresh }"
           :aria-pressed="autoRefresh ? 'true' : 'false'"
-          :title="autoRefresh ? '自動更新 オン（クリックでオフ）' : '自動更新 オフ（クリックでオン）'"
           @click="toggleAutoRefresh"
         >
-          {{ autoRefresh ? "自動 ●" : "自動 ○" }}
+          <span class="dot" aria-hidden="true" />
+          自動更新
         </button>
-        <button
-          type="button"
-          class="refresh"
-          :disabled="loading"
-          @click="load"
-        >
+        <button type="button" class="pill ghost" :disabled="loading" @click="load">
           再読込
         </button>
         <button
           type="button"
-          class="ingest"
+          class="pill primary"
           :disabled="loading || ingesting"
           @click="onIngest"
         >
-          {{ ingesting ? "取り込み中…" : "手動更新" }}
+          {{ ingesting ? "取り込み中…" : "取り込む" }}
         </button>
       </div>
     </header>
+
+    <section class="counter-row">
+      <div class="metric" :class="{ clear: unhandledCount === 0 }">
+        <span class="metric-blob" aria-hidden="true" />
+        <span class="metric-num num">{{ displayCount }}</span>
+        <span class="metric-label">未対応</span>
+      </div>
+      <div class="stats" aria-label="現在の内訳">
+        <span class="stat"><span class="stat-num num">{{ records.length }}</span>表示中</span>
+        <span class="stat"><span class="stat-dot magenta" aria-hidden="true" /><span class="stat-num num">{{ needsReplyCount }}</span>要返信</span>
+        <span class="stat"><span class="stat-dot cyan" aria-hidden="true" /><span class="stat-num num">{{ inProgressCount }}</span>対応中</span>
+        <span class="stat"><span class="stat-dot yellow" aria-hidden="true" /><span class="stat-num num">{{ snoozedCount }}</span>保留</span>
+      </div>
+    </section>
 
     <nav class="tabs" role="tablist" aria-label="メールビュー切り替え">
       <button
@@ -243,11 +319,6 @@ onUnmounted(() => { stopAutoRefresh(); });
         @click="switchTab('inbox')"
       >
         受信トレイ
-        <span
-          v-if="activeTab === 'inbox' && unhandledCount > 0"
-          class="tab-badge"
-          aria-hidden="true"
-        >{{ unhandledCount }}</span>
       </button>
       <button
         role="tab"
@@ -260,51 +331,100 @@ onUnmounted(() => { stopAutoRefresh(); });
       </button>
     </nav>
 
-    <main class="main">
-      <p v-if="error" class="banner err" role="alert">{{ error }}</p>
-      <p v-if="notice" class="banner info" role="status">{{ notice }}</p>
+    <FilterBar
+      :model-value="activeTab === 'inbox' ? inboxQuery : archiveQuery"
+      :providers="availableProviders"
+      :accounts="accountsList"
+      @update:model-value="onQueryChange"
+    />
 
-      <FilterBar
-        :model-value="activeTab === 'inbox' ? inboxQuery : archiveQuery"
-        :providers="availableProviders"
-        :accounts="accountsList"
-        @update:model-value="onQueryChange"
-      />
+    <p v-if="error" class="banner err" role="alert">{{ error }}</p>
+    <p v-if="notice" class="banner info" role="status">{{ notice }}</p>
 
-      <p v-if="loading && records.length === 0" class="state-msg">読み込み中…</p>
-      <div
-        v-else-if="!loading && records.length === 0 && !error && hasAccounts === false"
-        class="state-msg no-account"
-      >
-        <p>アカウントが設定されていません.</p>
-        <button type="button" class="btn-add-account" @click="showAccounts = true">
-          アカウントを追加
-        </button>
-      </div>
-      <p
-        v-else-if="!loading && records.length === 0 && !error"
-        class="state-msg"
-      >
-        <template v-if="activeTab === 'inbox'">
-          メッセージはありません. 「手動更新」で取り込んでください.
-        </template>
+    <Transition name="view" mode="out-in">
+      <div :key="activeTab" class="gallery">
+        <div v-if="loading && records.length === 0" class="state-zone" role="status">
+          <span class="loading-dots" aria-hidden="true">
+            <span class="ld c" /><span class="ld y" /><span class="ld m" />
+          </span>
+          <span class="state-sub">読み込み中…</span>
+        </div>
+
+        <div
+          v-else-if="!loading && records.length === 0 && !error && hasAccounts === false"
+          class="state-zone"
+        >
+          <span class="state-blob" aria-hidden="true" />
+          <span class="state-title">はじめましょう</span>
+          <span class="state-sub">アカウントを追加すると，メッセージの取り込みが始まります.</span>
+          <button type="button" class="pill primary" @click="showAccounts = true">
+            アカウントを追加
+          </button>
+        </div>
+
+        <div
+          v-else-if="!loading && records.length === 0 && !error"
+          class="state-zone"
+        >
+          <template v-if="activeTab === 'inbox'">
+            <span class="state-blob green" aria-hidden="true" />
+            <span class="state-title">ぜんぶ仕分け済み！</span>
+            <span class="state-sub">新着が来たら「取り込む」でボードに並びます.</span>
+          </template>
+          <template v-else>
+            <span class="state-blob" aria-hidden="true" />
+            <span class="state-title">アーカイブは空です</span>
+            <span class="state-sub">完了・対象外にしたメッセージがここに収まります.</span>
+          </template>
+        </div>
+
         <template v-else>
-          アーカイブにメッセージはありません.
-        </template>
-      </p>
+          <!-- Signature: いま見るべきゾーン -->
+          <template v-if="priorityRecords.length > 0">
+            <h2 class="zone-label">
+              <span class="zone-blob" aria-hidden="true" />
+              いま見るべき
+              <span class="zone-count num">{{ priorityRecords.length }}</span>
+            </h2>
+            <TransitionGroup name="cards" tag="div" class="stack now-zone" appear>
+              <div
+                v-for="(r, i) in priorityRecords"
+                :key="r.message_id"
+                class="slot"
+                :style="stagger(i)"
+              >
+                <MessageCard
+                  :record="r"
+                  :busy="busyIds.has(r.message_id)"
+                  :mode="activeTab"
+                  priority
+                  @change-state="(s) => onChangeState(r, s)"
+                  @unarchive="onUnarchive(r)"
+                />
+              </div>
+            </TransitionGroup>
+            <h2 class="zone-label rest">そのほか</h2>
+          </template>
 
-      <div v-else class="list">
-        <MessageCard
-          v-for="r in records"
-          :key="r.message_id"
-          :record="r"
-          :busy="busyIds.has(r.message_id)"
-          :mode="activeTab"
-          @change-state="(s) => onChangeState(r, s)"
-          @unarchive="onUnarchive(r)"
-        />
+          <TransitionGroup name="cards" tag="div" class="stack" appear>
+            <div
+              v-for="(r, i) in standardRecords"
+              :key="r.message_id"
+              class="slot"
+              :style="stagger(priorityRecords.length + i)"
+            >
+              <MessageCard
+                :record="r"
+                :busy="busyIds.has(r.message_id)"
+                :mode="activeTab"
+                @change-state="(s) => onChangeState(r, s)"
+                @unarchive="onUnarchive(r)"
+              />
+            </div>
+          </TransitionGroup>
+        </template>
       </div>
-    </main>
+    </Transition>
 
     <AccountsModal
       v-if="showAccounts"
@@ -315,165 +435,463 @@ onUnmounted(() => { stopAutoRefresh(); });
 </template>
 
 <style scoped>
-.app {
-  max-width: 920px;
+/* ============ 背景ブロブ ============ */
+.blobs {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.blob {
+  position: absolute;
+  width: 480px;
+  height: 480px;
+  border-radius: var(--radius-blob);
+  filter: blur(110px);
+  opacity: 0.11;
+  animation: drift 22s var(--ease-smooth) infinite alternate;
+}
+.b1 {
+  background: var(--fl-cyan);
+  top: -160px;
+  left: -120px;
+}
+.b2 {
+  background: var(--fl-magenta);
+  top: 30%;
+  right: -200px;
+  animation-duration: 26s;
+}
+.b3 {
+  background: var(--fl-yellow);
+  bottom: -220px;
+  left: 28%;
+  animation-duration: 18s;
+}
+@keyframes drift {
+  from {
+    transform: translate(0, 0) rotate(0deg) scale(1);
+  }
+  to {
+    transform: translate(60px, 40px) rotate(24deg) scale(1.12);
+  }
+}
+
+/* ============ ティッカー ============ */
+.ticker {
+  position: relative;
+  z-index: 1;
+  background: var(--ink);
+  color: #fff;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.ticker-track {
+  display: inline-flex;
+  animation: marquee 40s linear infinite;
+}
+.ticker-text {
+  font-family: var(--font-display);
+  font-size: var(--text-12);
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  padding: var(--space-1) 0;
+  text-transform: uppercase;
+}
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+/* ============ スタジオ（メイン容器） ============ */
+.studio {
+  position: relative;
+  z-index: 1;
+  max-width: 880px;
   margin: 0 auto;
-  padding: 0 16px 48px;
+  padding: var(--space-6) var(--space-6) var(--space-24);
 }
-.bar {
-  position: sticky;
-  top: 0;
-  z-index: 10;
+
+/* ============ ヒーロー ============ */
+.hero {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
-  padding: 12px 0;
-  background: var(--bg);
-  border-bottom: 1px solid var(--border);
+  gap: var(--space-4);
+  flex-wrap: wrap;
 }
-.brand {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
+.wordmark {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-28);
+  font-weight: 900;
+  color: var(--ink);
+  line-height: 1.1;
 }
-.logo {
-  font-size: 18px;
-  font-weight: 800;
-  color: var(--accent);
+.wordmark em {
+  font-style: normal;
+  color: var(--fl-magenta);
 }
-.tag-line {
-  font-size: 12px;
-  color: var(--text-muted);
+.tagline {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-12);
+  color: var(--ink-soft);
 }
-.bar-right {
+.hero-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
+  flex-wrap: wrap;
 }
-.counter {
-  font-size: 13px;
-  color: var(--text-muted);
-  padding: 4px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-12);
+  font-weight: 500;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-pill);
+  border: 1.5px solid var(--line);
+  background: var(--card);
+  color: var(--ink-soft);
+  transition: background var(--duration-micro) var(--ease-smooth),
+    color var(--duration-micro) var(--ease-smooth),
+    transform var(--duration-micro) var(--ease-spring),
+    box-shadow var(--duration-micro) var(--ease-spring);
 }
-.counter.alert {
-  color: var(--danger);
-  background: var(--danger-weak);
-  border-color: var(--danger);
+.pill.ghost:hover:not(:disabled) {
+  background: var(--card-inset);
+  color: var(--ink);
+}
+.pill.primary {
+  border: none;
+  background: var(--ink);
+  color: #fff;
   font-weight: 700;
 }
-.accounts-btn,
-.auto-refresh-btn,
-.refresh,
-.ingest {
-  font-size: 13px;
-  padding: 6px 14px;
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--text);
+.pill.primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: var(--elev-2);
 }
-.auto-refresh-btn.active {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-.ingest {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: #fff;
-}
-.refresh:disabled,
-.ingest:disabled {
-  opacity: 0.6;
+.pill:disabled {
+  opacity: 0.4;
   cursor: not-allowed;
 }
-.tabs {
+.pill .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ink-faint);
+  flex: none;
+  transition: background var(--duration-micro) var(--ease-smooth);
+}
+.pill.on .dot {
+  background: var(--fl-green);
+}
+.pill.on {
+  color: var(--ink);
+}
+
+/* ============ ヒーロー数字＋内訳 ============ */
+.counter-row {
   display: flex;
-  border-bottom: 1px solid var(--border);
-  margin-top: 12px;
+  align-items: center;
+  gap: var(--space-8);
+  margin: var(--space-8) 0 var(--space-6);
+  flex-wrap: wrap;
+}
+.metric {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+}
+.metric-blob {
+  position: absolute;
+  left: -8px;
+  top: -10px;
+  width: 96px;
+  height: 96px;
+  background: var(--fl-magenta);
+  border-radius: var(--radius-blob);
+  opacity: 0.9;
+  z-index: 0;
+  transition: background var(--duration-base) var(--ease-smooth);
+}
+.metric.clear .metric-blob {
+  background: var(--fl-green);
+}
+.metric-num {
+  position: relative;
+  z-index: 1;
+  font-family: var(--font-display);
+  font-size: var(--text-64);
+  font-weight: 900;
+  line-height: 1;
+  color: var(--ink);
+}
+.metric-label {
+  position: relative;
+  z-index: 1;
+  font-size: var(--text-14);
+  font-weight: 700;
+  color: var(--ink);
+}
+.stats {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.stat {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-12);
+  color: var(--ink-soft);
+  background: var(--card);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--elev-1);
+  padding: var(--space-1) var(--space-4);
+}
+.stat-num {
+  font-family: var(--font-display);
+  font-size: var(--text-14);
+  font-weight: 700;
+  color: var(--ink);
+}
+.stat-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+.stat-dot.magenta {
+  background: var(--fl-magenta);
+}
+.stat-dot.cyan {
+  background: var(--fl-cyan);
+}
+.stat-dot.yellow {
+  background: var(--fl-yellow);
+}
+
+/* ============ タブ ============ */
+.tabs {
+  display: inline-flex;
+  gap: var(--space-1);
+  background: var(--card-inset);
+  border-radius: var(--radius-pill);
+  padding: var(--space-1);
+  margin-bottom: var(--space-4);
 }
 .tab {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
-  font-size: 14px;
+  font-size: var(--text-14);
   font-weight: 500;
-  color: var(--text-muted);
-  background: none;
+  padding: var(--space-2) var(--space-6);
+  border-radius: var(--radius-pill);
   border: none;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  cursor: pointer;
-  transition: color 0.15s, border-color 0.15s;
+  background: transparent;
+  color: var(--ink-soft);
+  transition: background var(--duration-micro) var(--ease-smooth),
+    color var(--duration-micro) var(--ease-smooth);
 }
 .tab:hover {
-  color: var(--text);
+  color: var(--ink);
 }
 .tab.active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
-}
-.tab-badge {
-  font-size: 11px;
-  font-weight: 700;
-  background: var(--danger);
+  background: var(--ink);
   color: #fff;
-  border-radius: 999px;
-  padding: 1px 6px;
-  min-width: 16px;
-  text-align: center;
+  font-weight: 700;
 }
-.main {
-  margin-top: 16px;
-}
+
+/* ============ バナー ============ */
 .banner {
-  margin: 0 0 12px;
-  padding: 10px 12px;
-  border-radius: var(--radius);
-  font-size: 13px;
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-inset);
+  font-size: var(--text-12);
+  color: var(--ink);
 }
 .banner.err {
-  color: var(--danger);
-  background: var(--danger-weak);
-  border: 1px solid var(--danger);
+  background: var(--rose-tint);
 }
 .banner.info {
-  color: var(--accent);
-  background: var(--accent-weak);
-  border: 1px solid var(--accent);
+  background: var(--fl-cyan-tint);
 }
-.state-msg {
-  color: var(--text-muted);
-  text-align: center;
-  padding: 48px 0;
+
+/* ============ ギャラリー（カード一覧） ============ */
+.gallery {
+  min-height: 200px;
 }
-.no-account {
+.stack {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.zone-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-6) 0 var(--space-3);
+  font-size: var(--text-16);
+  font-weight: 700;
+  color: var(--ink);
+}
+.zone-label:first-of-type {
+  margin-top: var(--space-2);
+}
+.zone-blob {
+  width: 18px;
+  height: 18px;
+  background: var(--fl-magenta);
+  border-radius: var(--radius-blob);
+  flex: none;
+}
+.zone-count {
+  font-family: var(--font-display);
+  font-size: var(--text-14);
+  font-weight: 700;
+  background: var(--fl-magenta-tint);
+  border-radius: var(--radius-pill);
+  padding: 0 var(--space-3);
+}
+.zone-label.rest {
+  font-size: var(--text-14);
+  color: var(--ink-soft);
+}
+
+/* いま見るべきゾーンはわずかに回転（現代アートの貼り紙） */
+.now-zone .slot:nth-child(odd) {
+  transform: rotate(-0.6deg);
+}
+.now-zone .slot:nth-child(even) {
+  transform: rotate(0.5deg);
+}
+
+/* ============ カードの出現・移動・退場（FLIP） ============ */
+.cards-enter-active {
+  transition: opacity var(--duration-base) var(--ease-spring),
+    transform var(--duration-base) var(--ease-spring);
+}
+.cards-leave-active {
+  position: absolute;
+  width: 100%;
+  transition: opacity var(--duration-micro) var(--ease-smooth),
+    transform var(--duration-micro) var(--ease-smooth);
+}
+.cards-enter-from {
+  opacity: 0;
+  transform: translateY(20px) scale(0.97);
+}
+.cards-leave-to {
+  opacity: 0;
+  transform: scale(0.95);
+}
+.cards-move {
+  transition: transform var(--duration-base) var(--ease-smooth);
+}
+
+/* ============ タブ切替の画面遷移 ============ */
+.view-enter-active,
+.view-leave-active {
+  transition: opacity var(--duration-micro) var(--ease-smooth),
+    transform var(--duration-micro) var(--ease-smooth);
+}
+.view-enter-from {
+  opacity: 0;
+  transform: translateX(24px);
+}
+.view-leave-to {
+  opacity: 0;
+  transform: translateX(-24px);
+}
+
+/* ============ 空・読み込み状態 ============ */
+.state-zone {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-3);
+  padding: var(--space-16) 0;
+  text-align: center;
 }
-.no-account p {
-  margin: 0;
+.state-blob {
+  width: 72px;
+  height: 72px;
+  background: var(--fl-cyan);
+  border-radius: var(--radius-blob);
+  opacity: 0.85;
 }
-.btn-add-account {
-  font-size: 13px;
-  padding: 6px 16px;
-  border-radius: var(--radius);
-  border: 1px solid var(--accent);
-  background: var(--accent);
-  color: #fff;
-  cursor: pointer;
+.state-blob.green {
+  background: var(--fl-green);
 }
-.btn-add-account:hover {
-  opacity: 0.88;
+.state-title {
+  font-size: var(--text-20);
+  font-weight: 700;
+  color: var(--ink);
 }
-.list {
+.state-sub {
+  font-size: var(--text-12);
+  color: var(--ink-soft);
+}
+.loading-dots {
   display: flex;
-  flex-direction: column;
-  gap: var(--gap);
+  gap: var(--space-2);
+}
+.ld {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  animation: bounce 900ms var(--ease-smooth) infinite alternate;
+}
+.ld.c {
+  background: var(--fl-cyan);
+}
+.ld.y {
+  background: var(--fl-yellow);
+  animation-delay: 150ms;
+}
+.ld.m {
+  background: var(--fl-magenta);
+  animation-delay: 300ms;
+}
+@keyframes bounce {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-10px);
+  }
+}
+
+/* ============ レスポンシブ ============ */
+@media (max-width: 720px) {
+  .studio {
+    padding: var(--space-4) var(--space-4) var(--space-16);
+  }
+  .counter-row {
+    gap: var(--space-4);
+    margin: var(--space-6) 0 var(--space-4);
+  }
+  .metric-num {
+    font-size: var(--text-40);
+  }
+  .metric-blob {
+    width: 64px;
+    height: 64px;
+    left: -4px;
+    top: -6px;
+  }
 }
 </style>

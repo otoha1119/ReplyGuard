@@ -1,27 +1,88 @@
+/* ============================================================
+   ReplyGuard デザイントークン — 単一ソースは DESIGN.md
+   motif: 蛍光マーカーの仕分けスタジオ
+   （白いギャラリー壁 × Fluorescence 5色のマーカーストローク）
+   ============================================================ */
+
 :root {
-  /* design-spec light テーマ由来. 状態で色を分け, 装飾には使わない */
-  --bg: #f6f8fb;
-  --surface: #ffffff;
-  --border: #d8dee9;
-  --text: #1c2430;
-  --text-muted: #5a6678;
-  --accent: #2563eb;
-  --accent-weak: #eef3fb;
-  --success: #0f7a43;
-  --success-weak: #e9f7ef;
-  --warning: #946312;
-  --warning-weak: #fcf3e0;
-  --danger: #b42318;
-  --danger-weak: #fdecec;
+  /* --- 基調（白いギャラリー壁） --- */
+  --wall: #fdfdfb;
+  --card: #ffffff;
+  --card-inset: #f6f6f9;
+  --line: #eae9f0;
+  --ink: #232038;
+  --ink-soft: #6e6a85;
+  --ink-faint: #a8a5bb;
 
-  --radius: 6px;
-  --gap: 12px;
+  /* --- Fluorescence（ユーザー指定 5 色） --- */
+  --fl-cyan: #00b9e5;
+  --fl-green: #38d430;
+  --fl-yellow: #e3e82b;
+  --fl-orange: #ffab4d;
+  --fl-magenta: #ef2bc1;
 
-  --imp-1: #5a6678;
-  --imp-2: #2563eb;
-  --imp-3: #946312;
-  --imp-4: #c2410c;
-  --imp-5: #b42318;
+  /* 淡色（チップ背景）と中間色（マーカーストローク） */
+  --fl-cyan-tint: color-mix(in srgb, var(--fl-cyan) 14%, white);
+  --fl-green-tint: color-mix(in srgb, var(--fl-green) 14%, white);
+  --fl-yellow-tint: color-mix(in srgb, var(--fl-yellow) 18%, white);
+  --fl-orange-tint: color-mix(in srgb, var(--fl-orange) 16%, white);
+  --fl-magenta-tint: color-mix(in srgb, var(--fl-magenta) 12%, white);
+  --fl-cyan-stroke: color-mix(in srgb, var(--fl-cyan) 45%, white);
+  --fl-green-stroke: color-mix(in srgb, var(--fl-green) 45%, white);
+  --fl-yellow-stroke: color-mix(in srgb, var(--fl-yellow) 55%, white);
+  --fl-orange-stroke: color-mix(in srgb, var(--fl-orange) 50%, white);
+  --fl-magenta-stroke: color-mix(in srgb, var(--fl-magenta) 38%, white);
+
+  /* エラー・破壊的操作（蛍光と分離した唯一の機能色） */
+  --rose: #d6336c;
+  --rose-tint: color-mix(in srgb, var(--rose) 10%, white);
+
+  /* --- 重要度ランプ（マーカー 5 色） --- */
+  --imp-1: var(--fl-cyan);
+  --imp-2: var(--fl-green);
+  --imp-3: var(--fl-yellow);
+  --imp-4: var(--fl-orange);
+  --imp-5: var(--fl-magenta);
+
+  /* --- タイポグラフィ --- */
+  --font-display: "Unbounded", sans-serif;
+  --font-body: "Zen Maru Gothic", "Hiragino Maru Gothic ProN", sans-serif;
+  --text-12: 12px;
+  --text-14: 14px;
+  --text-16: 16px;
+  --text-20: 20px;
+  --text-28: 28px;
+  --text-40: 40px;
+  --text-64: 64px;
+
+  /* --- スペーシング --- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-24: 96px;
+
+  /* --- elevation（インク色の柔らかい二層影） --- */
+  --elev-1: 0 2px 8px rgba(35, 32, 56, 0.06), 0 1px 2px rgba(35, 32, 56, 0.05);
+  --elev-2: 0 12px 32px rgba(35, 32, 56, 0.1), 0 2px 6px rgba(35, 32, 56, 0.06);
+  --elev-3: 0 24px 64px rgba(35, 32, 56, 0.16), 0 4px 12px rgba(35, 32, 56, 0.08);
+
+  /* --- radius --- */
+  --radius-inset: 12px;
+  --radius-card: 20px;
+  --radius-panel: 28px;
+  --radius-pill: 9999px;
+  --radius-blob: 42% 58% 56% 44% / 56% 44% 56% 44%;
+
+  /* --- モーション --- */
+  --duration-micro: 200ms;
+  --duration-base: 400ms;
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-smooth: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 * {
@@ -35,12 +96,11 @@ body {
 }
 
 body {
-  background: var(--bg);
-  color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Kaku Gothic ProN",
-    "Noto Sans JP", Meiryo, sans-serif;
-  font-size: 14px;
-  line-height: 1.5;
+  background: var(--wall);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: var(--text-14);
+  line-height: 1.6;
 }
 
 button {
@@ -48,9 +108,20 @@ button {
   cursor: pointer;
 }
 
-/* フォーカス可視化 (WCAG 2.1 AA) */
+input,
+select {
+  font: inherit;
+}
+
+/* 数値の比較列は等幅揃え */
+time,
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* フォーカス可視化 (WCAG 2.2 AA) */
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 3px solid color-mix(in srgb, var(--fl-cyan) 60%, white);
   outline-offset: 2px;
 }
 

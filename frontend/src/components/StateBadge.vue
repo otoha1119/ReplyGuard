@@ -16,43 +16,59 @@ const label = computed(() => LABELS[props.state]);
 </script>
 
 <template>
-  <span class="state" :class="`state-${state}`">{{ label }}</span>
+  <span class="state" :class="`state-${state}`">
+    <span v-if="state !== 'unhandled'" class="hue-dot" aria-hidden="true" />
+    {{ label }}
+  </span>
 </template>
 
 <style scoped>
+/* 柔らかい pill チップ: 文字は常にインク（AA 安定），色相は前置ドットで示す */
 .state {
   display: inline-flex;
   align-items: center;
-  height: 22px;
-  padding: 0 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 600;
-  border: 1px solid transparent;
+  gap: 6px;
+  padding: 3px var(--space-3);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-12);
+  font-weight: 700;
+  color: var(--ink);
 }
+.hue-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+/* 未対応だけ反転の最強表現 */
 .state-unhandled {
-  color: var(--danger);
-  background: var(--danger-weak);
-  border-color: var(--danger);
+  background: var(--ink);
+  color: #fff;
 }
 .state-in_progress {
-  color: var(--accent);
-  background: var(--accent-weak);
-  border-color: var(--accent);
+  background: var(--fl-cyan-tint);
+}
+.state-in_progress .hue-dot {
+  background: var(--fl-cyan);
 }
 .state-done {
-  color: var(--success);
-  background: var(--success-weak);
-  border-color: var(--success);
+  background: var(--fl-green-tint);
+}
+.state-done .hue-dot {
+  background: var(--fl-green);
 }
 .state-snoozed {
-  color: var(--warning);
-  background: var(--warning-weak);
-  border-color: var(--warning);
+  background: var(--fl-yellow-tint);
+}
+.state-snoozed .hue-dot {
+  background: color-mix(in srgb, var(--fl-yellow) 80%, var(--ink));
 }
 .state-dismissed {
-  color: var(--text-muted);
-  background: var(--bg);
-  border-color: var(--border);
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--line);
+  color: var(--ink-faint);
+}
+.state-dismissed .hue-dot {
+  background: var(--line);
 }
 </style>
