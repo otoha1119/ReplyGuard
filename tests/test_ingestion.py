@@ -40,7 +40,6 @@ class CountingAnalyzer:
         self.calls += 1
         return AnalysisResult(
             importance=4,
-            needs_reply=True,
             task_weight="medium",
             request_type="reply_required",
             summary="要約",

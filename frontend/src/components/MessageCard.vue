@@ -136,7 +136,7 @@ const nextStates = computed(() =>
       <div class="tags">
         <span v-if="requestTypeLabel" class="tag">{{ requestTypeLabel }}</span>
         <span v-if="weightLabel" class="tag weight">負荷 {{ weightLabel }}</span>
-        <span v-if="analysis?.needs_reply" class="tag reply">要返信</span>
+        <span v-if="analysis?.request_type === 'reply_required'" class="tag reply">要返信</span>
         <span
           v-if="analyzerLabel"
           class="tag analyzer"

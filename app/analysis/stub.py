@@ -164,11 +164,8 @@ class StubAnalyzer:
 
         return AnalysisResult(
             importance=importance,
-            needs_reply=needs_reply,
             task_weight=task_weight,
             request_type=request_type,
-            has_deadline=deadline is not None,
-            is_direct=needs_reply,
             is_promotional=is_promotional,
             summary=_summarize(subject, body),
             suggested_action=suggested_action,

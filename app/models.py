@@ -52,11 +52,8 @@ class AnalysisResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     importance: int = Field(ge=1, le=5)                       # 重要度 1-5
-    needs_reply: bool = False                                 # 対応要否
     task_weight: Literal["light", "medium", "heavy"] = "light"
     request_type: RequestType = "info_only"                   # 対応区分
-    has_deadline: bool = False                                # 期限の有無
-    is_direct: bool = False                                   # 自分宛の直接対応依頼か
     is_promotional: bool = False                              # 宣伝・広告・メルマガ等か
     summary: str = ""                                         # 要約
     suggested_action: str | None = None

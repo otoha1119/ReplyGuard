@@ -24,11 +24,8 @@ export type RequestType =
 
 export interface AnalysisResult {
   importance: number; // 1-5
-  needs_reply: boolean;
   task_weight: TaskWeight;
   request_type: RequestType;
-  has_deadline: boolean;
-  is_direct: boolean;
   is_promotional: boolean;
   summary: string;
   suggested_action: string | null;

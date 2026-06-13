@@ -31,7 +31,6 @@ _MAX_TOKENS = 1024
 # "analyzer" は呼び出し側で上書きするため含めない.
 _RESPONSE_PROPERTIES: dict[str, Any] = {
     "importance": {"type": "integer", "minimum": 1, "maximum": 5},
-    "needs_reply": {"type": "boolean"},
     "task_weight": {"type": "string", "enum": ["light", "medium", "heavy"]},
     "request_type": {
         "type": "string",
@@ -44,8 +43,6 @@ _RESPONSE_PROPERTIES: dict[str, Any] = {
             "info_only",
         ],
     },
-    "has_deadline": {"type": "boolean"},
-    "is_direct": {"type": "boolean"},
     "is_promotional": {"type": "boolean"},
     "summary": {"type": "string"},
     "suggested_action": {"type": ["string", "null"]},
@@ -73,7 +70,6 @@ _GEMINI_RESPONSE_SCHEMA: dict[str, Any] = {
     "type": "OBJECT",
     "properties": {
         "importance": {"type": "INTEGER"},
-        "needs_reply": {"type": "BOOLEAN"},
         "task_weight": {"type": "STRING", "enum": ["light", "medium", "heavy"]},
         "request_type": {
             "type": "STRING",
@@ -86,8 +82,6 @@ _GEMINI_RESPONSE_SCHEMA: dict[str, Any] = {
                 "info_only",
             ],
         },
-        "has_deadline": {"type": "BOOLEAN"},
-        "is_direct": {"type": "BOOLEAN"},
         "is_promotional": {"type": "BOOLEAN"},
         "summary": {"type": "STRING"},
         "suggested_action": {"type": "STRING", "nullable": True},
@@ -96,11 +90,8 @@ _GEMINI_RESPONSE_SCHEMA: dict[str, Any] = {
     },
     "required": [
         "importance",
-        "needs_reply",
         "task_weight",
         "request_type",
-        "has_deadline",
-        "is_direct",
         "is_promotional",
         "summary",
         "reason",

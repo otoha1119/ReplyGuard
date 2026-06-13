@@ -14,11 +14,8 @@ from tests.conftest import make_email
 
 VALID_JSON = """{
   "importance": 5,
-  "needs_reply": true,
   "task_weight": "heavy",
   "request_type": "reply_required",
-  "has_deadline": true,
-  "is_direct": true,
   "is_promotional": false,
   "summary": "契約書の返信依頼",
   "suggested_action": "本日中に返信する",
@@ -112,7 +109,7 @@ def _make_ollama(text: str) -> LLMAnalyzer:
 def test_anthropic_valid_json_parsed():
     result = _make_anthropic(VALID_JSON).analyze(make_email())
     assert result.importance == 5
-    assert result.needs_reply is True
+    assert result.request_type == "reply_required"
     assert result.task_weight == "heavy"
     assert result.analyzer == "anthropic"
     assert result.deadline is not None
@@ -127,7 +124,7 @@ def test_openai_valid_json_parsed():
 def test_gemini_valid_json_parsed():
     result = _make_gemini(VALID_JSON).analyze(make_email())
     assert result.importance == 5
-    assert result.needs_reply is True
+    assert result.request_type == "reply_required"
     assert result.task_weight == "heavy"
     assert result.analyzer == "gemini"
     assert result.deadline is not None
@@ -150,7 +147,7 @@ def test_gemini_extra_key_falls_back():
 def test_ollama_valid_json_parsed():
     result = _make_ollama(VALID_JSON).analyze(make_email())
     assert result.importance == 5
-    assert result.needs_reply is True
+    assert result.request_type == "reply_required"
     assert result.analyzer == "ollama"
 
 
