@@ -4,9 +4,11 @@ IngestionService は AccountRepository からアカウントを取得し, プロ
 ソースを動的に構築してメールを取得する. 1 通の失敗で全体を落とさず, 個別に
 握り込んでログへ残す（観測性）. 本文全文はログ・例外詳細に出さない（LLM02）.
 
-分析（LLM）は 1 メールにつき生涯 1 回だけ呼ぶ: 既に analysis を持つ既存レコードは
-保存済み結果を再利用し, LLM を再呼び出ししない（従量課金の抑制）. 期限に依存する
-triage/urgency スコアは純粋関数で安価なため, 毎サイクル now で再計算する.
+分析（LLM）は 1 メールにつき原則 1 回だけ呼ぶ（従量課金の抑制）. ただし再利用する
+のは「現行アナライザが出した結果」に限る: レート上限超過などで前回 stub へフォール
+バックした結果は確定扱いにせず, 次サイクルで本来のアナライザに昇格させる（取り残し
+防止）. 成功後は同一結果を再利用し再課金しない. 期限に依存する triage/urgency
+スコアは純粋関数で安価なため, 毎サイクル now で再計算する.
 """
 
 import logging
@@ -105,13 +107,27 @@ class IngestionService:
         records: list[MessageRecord] = []
         is_new_by_id: dict[str, bool] = {}
 
+        # 現行アナライザの識別ラベル（LLM は provider, それ以外は name, 既定 "stub"）.
+        # このラベルと一致する保存済み結果だけを再利用する. 前回レート上限等で stub に
+        # フォールバックした結果は一致しないため, 次サイクルで本来のアナライザに昇格する.
+        expected_analyzer = (
+            getattr(self._analyzer, "provider", None)
+            or getattr(self._analyzer, "name", None)
+            or "stub"
+        )
+
         for email, source_address in email_source_pairs:
             message_id = MessageRecord.make_id(email.provider, email.id)
             try:
                 existing = self._repo.get(message_id)
-                # 分析は「生涯 1 回」: 既に分析済みなら結果を再利用し LLM を呼ばない
-                # （従量課金の抑制）. スコアは now 依存のため毎回ローカルで再計算する（無料）.
-                if existing is not None and existing.analysis is not None:
+                # 分析は原則 1 回（従量課金の抑制）. ただし再利用は現行アナライザの結果に
+                # 限り, 前回フォールバックした stub 等は再分析して昇格させる.
+                # スコアは now 依存のため毎回ローカルで再計算する（無料）.
+                if (
+                    existing is not None
+                    and existing.analysis is not None
+                    and existing.analysis.analyzer == expected_analyzer
+                ):
                     analysis = existing.analysis
                 else:
                     analysis = self._analyzer.analyze(email)

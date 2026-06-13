@@ -18,7 +18,9 @@ from tests.conftest import make_email
 
 
 class CountingAnalyzer:
-    """analyze 呼び出し回数を数えるフェイク analyzer."""
+    """analyze 呼び出し回数を数えるフェイク analyzer（自分の name を analyzer に刻む）."""
+
+    name = "fake"
 
     def __init__(self) -> None:
         self.calls = 0
@@ -32,7 +34,26 @@ class CountingAnalyzer:
             category="action_required",
             summary="要約",
             reason="テスト",
-            analyzer="fake",
+            analyzer=self.name,
+        )
+
+
+class FlakyGeminiAnalyzer:
+    """provider=gemini を名乗るが, 1 回目だけ stub へフォールバックした体を返す.
+
+    レート上限超過 → stub フォールバック → 次サイクルで昇格, の挙動を模す.
+    """
+
+    provider = "gemini"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def analyze(self, email: EmailMessage) -> AnalysisResult:
+        self.calls += 1
+        label = "stub" if self.calls == 1 else "gemini"  # 初回のみ失敗→stub
+        return AnalysisResult(
+            importance=3, summary="x", reason="y", analyzer=label
         )
 
 
@@ -122,3 +143,23 @@ def test_reused_analysis_is_persisted():
     assert record is not None
     assert record.analysis is not None
     assert record.analysis.importance == 4
+
+
+def test_fallback_stub_is_reanalyzed_until_provider_succeeds():
+    """前回 stub へ落ちた結果は確定扱いにせず, 次サイクルで gemini へ昇格する."""
+    analyzer = FlakyGeminiAnalyzer()
+    service = _make_service(FakeSource([make_email("1")]), analyzer)
+
+    # 1 サイクル目: gemini が失敗し stub へフォールバック.
+    service.run_once()
+    assert analyzer.calls == 1
+    assert service._repo.get("gmail:1").analysis.analyzer == "stub"
+
+    # 2 サイクル目: stub != gemini なので再分析 → 今度は成功して gemini に昇格.
+    service.run_once()
+    assert analyzer.calls == 2
+    assert service._repo.get("gmail:1").analysis.analyzer == "gemini"
+
+    # 3 サイクル目: gemini == gemini なので再利用（再課金しない）.
+    service.run_once()
+    assert analyzer.calls == 2
