@@ -14,9 +14,9 @@ from tests.conftest import make_email
 
 VALID_JSON = """{
   "importance": 5,
-  "needs_reply": true,
   "task_weight": "heavy",
-  "category": "action_required",
+  "request_type": "reply_required",
+  "is_promotional": false,
   "summary": "契約書の返信依頼",
   "suggested_action": "本日中に返信する",
   "deadline": "2026-06-15T00:00:00+00:00",
@@ -93,10 +93,23 @@ def _make_gemini(text: str) -> LLMAnalyzer:
     )
 
 
+def _make_ollama(text: str) -> LLMAnalyzer:
+    # Ollama は OpenAI 互換なので FakeOpenAIClient をそのまま流用できる.
+    return LLMAnalyzer(
+        provider="ollama",
+        api_key="ollama",
+        model="qwen2.5",
+        timeout_seconds=30,
+        max_body_chars=4000,
+        base_url="http://ollama.local:11434/v1",
+        client=FakeOpenAIClient(text),
+    )
+
+
 def test_anthropic_valid_json_parsed():
     result = _make_anthropic(VALID_JSON).analyze(make_email())
     assert result.importance == 5
-    assert result.needs_reply is True
+    assert result.request_type == "reply_required"
     assert result.task_weight == "heavy"
     assert result.analyzer == "anthropic"
     assert result.deadline is not None
@@ -111,7 +124,7 @@ def test_openai_valid_json_parsed():
 def test_gemini_valid_json_parsed():
     result = _make_gemini(VALID_JSON).analyze(make_email())
     assert result.importance == 5
-    assert result.needs_reply is True
+    assert result.request_type == "reply_required"
     assert result.task_weight == "heavy"
     assert result.analyzer == "gemini"
     assert result.deadline is not None
@@ -131,6 +144,18 @@ def test_gemini_extra_key_falls_back():
     assert result.analyzer == "stub"
 
 
+def test_ollama_valid_json_parsed():
+    result = _make_ollama(VALID_JSON).analyze(make_email())
+    assert result.importance == 5
+    assert result.request_type == "reply_required"
+    assert result.analyzer == "ollama"
+
+
+def test_ollama_invalid_json_falls_back_to_stub():
+    result = _make_ollama("これは JSON ではありません").analyze(make_email())
+    assert result.analyzer == "stub"
+
+
 def test_json_wrapped_in_code_fence_is_parsed():
     fenced = f"```json\n{VALID_JSON}\n```"
     result = _make_anthropic(fenced).analyze(make_email())
@@ -145,6 +170,12 @@ def test_invalid_json_falls_back_to_stub():
 
 def test_out_of_range_importance_falls_back():
     bad = VALID_JSON.replace('"importance": 5', '"importance": 99')
+    result = _make_anthropic(bad).analyze(make_email())
+    assert result.analyzer == "stub"
+
+
+def test_invalid_request_type_falls_back():
+    bad = VALID_JSON.replace('"request_type": "reply_required"', '"request_type": "unknown"')
     result = _make_anthropic(bad).analyze(make_email())
     assert result.analyzer == "stub"
 

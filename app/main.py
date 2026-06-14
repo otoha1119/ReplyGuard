@@ -75,6 +75,32 @@ async def lifespan(app: FastAPI):
         redirect_uri=settings.github_oauth_redirect_uri,
     )
     app.state.scheduler = None
+    app.state.feedback_service = None
+
+    # フィードバック学習（OLLAMA_BASE_URL が設定されている場合のみ有効）.
+    if settings.ollama_base_url:
+        try:
+            import chromadb  # noqa: F401 — 導入確認
+            from app.adapters.embedding.ollama_embed import OllamaEmbedding
+            from app.repositories.chroma_repository import ChromaRepository
+            from app.services.feedback_service import FeedbackService as _FeedbackService
+            _embedding = OllamaEmbedding(settings.ollama_base_url, settings.ollama_embed_model)
+            _vector_store = ChromaRepository(settings.chroma_path)
+            app.state.feedback_service = _FeedbackService(repo, _embedding, _vector_store)
+            logger.info("フィードバック学習 有効: embed_model=%s chroma=%s", settings.ollama_embed_model, settings.chroma_path)
+            # LLMAnalyzer にフィードバック検索を注入（stub は無視）.
+            if hasattr(analyzer, "configure_feedback"):
+                analyzer.configure_feedback(
+                    _embedding,
+                    _vector_store,
+                    top_k=settings.feedback_top_k,
+                    distance_threshold=settings.feedback_distance_threshold,
+                )
+                logger.info("フィードバック注入 有効: top_k=%d threshold=%.2f", settings.feedback_top_k, settings.feedback_distance_threshold)
+        except ImportError:
+            logger.warning("chromadb が未インストールです。フィードバック機能を無効化します。")
+        except Exception:
+            logger.exception("フィードバック初期化に失敗（起動は継続）")
 
     # env 変数にアカウントが設定されていて DB に未登録なら自動登録する.
     if settings.gmail_address and settings.gmail_app_password:

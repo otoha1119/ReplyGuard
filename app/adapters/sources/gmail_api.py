@@ -26,6 +26,24 @@ logger = logging.getLogger(__name__)
 _TOKEN_URI = "https://oauth2.googleapis.com/token"
 _SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
+_MIN_DT = datetime.min.replace(tzinfo=timezone.utc)
+
+# Gmail API のカテゴリラベル → email_category 値のマッピング.
+_CATEGORY_LABEL_MAP = {
+    "CATEGORY_PROMOTIONS": "promotion",
+    "CATEGORY_SOCIAL": "social",
+    "CATEGORY_UPDATES": "update",
+    "CATEGORY_FORUMS": "forum",
+}
+
+
+def _dt_key(m: "EmailMessage") -> datetime:
+    """received_at を UTC aware datetime に正規化するソートキー（None は最古扱い）."""
+    dt = m.received_at
+    if dt is None:
+        return _MIN_DT
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
 
 class GmailApiSource:
     def __init__(
@@ -50,7 +68,11 @@ class GmailApiSource:
         return ""
 
     def list_recent(self, limit: int = 10) -> list[EmailMessage]:
-        """Gmail API v1 で受信トレイを取得して EmailMessage のリストを返す（読み取り専用）．"""
+        """Gmail API v1 で受信トレイ + 迷惑メールを取得して EmailMessage のリストを返す（読み取り専用）．
+
+        Gmail が誤って迷惑メールへ振り分けたメールも分析対象に含めるため,
+        INBOX に加えて SPAM ラベルのメールも取得し is_spam=True で返す.
+        """
         try:
             service = self._build_service()
         except google.auth.exceptions.RefreshError:
@@ -58,22 +80,23 @@ class GmailApiSource:
             self._account_repo.set_auth_status(self._account_id, "reauth_required")
             raise
 
-        resp = (
-            service.users()
-            .messages()
-            .list(userId="me", maxResults=limit, labelIds=["INBOX"])
-            .execute()
-        )
-        messages = resp.get("messages", [])
         results = []
-        for m in messages:
-            try:
-                results.append(self._fetch_message(service, m["id"]))
-            except Exception:
-                logger.exception(
-                    "メール取得失敗 (id=%s, account=%s)", m["id"], self._account_id
-                )
-        return results
+        for label, is_spam in (("INBOX", False), ("SPAM", True)):
+            resp = (
+                service.users()
+                .messages()
+                .list(userId="me", maxResults=limit, labelIds=[label], includeSpamTrash=is_spam)
+                .execute()
+            )
+            for m in resp.get("messages", []):
+                try:
+                    results.append(self._fetch_message(service, m["id"], is_spam=is_spam))
+                except Exception:
+                    logger.exception(
+                        "メール取得失敗 (id=%s, account=%s)", m["id"], self._account_id
+                    )
+        results.sort(key=_dt_key, reverse=True)
+        return results[:limit]
 
     def detect_changes(
         self, start_cursor: str | None
@@ -155,7 +178,7 @@ class GmailApiSource:
         creds.refresh(Request())
         return build("gmail", "v1", credentials=creds)
 
-    def _fetch_message(self, service, message_id: str) -> EmailMessage:
+    def _fetch_message(self, service, message_id: str, *, is_spam: bool = False) -> EmailMessage:
         msg = (
             service.users()
             .messages()
@@ -174,6 +197,11 @@ class GmailApiSource:
             except Exception:
                 pass
 
+        label_ids = msg.get("labelIds", [])
+        email_category = next(
+            (_CATEGORY_LABEL_MAP[lbl] for lbl in label_ids if lbl in _CATEGORY_LABEL_MAP),
+            "primary",
+        )
         return EmailMessage(
             id=message_id,
             provider="gmail",
@@ -182,8 +210,10 @@ class GmailApiSource:
             to=[t.strip() for t in headers.get("to", "").split(",") if t.strip()],
             received_at=received_at,
             snippet=msg.get("snippet", "")[:200],
-            is_unread="UNREAD" in msg.get("labelIds", []),
+            is_unread="UNREAD" in label_ids,
             body_text=body[: self._max_body_chars] if body else None,
+            is_spam=is_spam,
+            email_category=email_category,
         )
 
     def _extract_body(self, payload: dict) -> str:

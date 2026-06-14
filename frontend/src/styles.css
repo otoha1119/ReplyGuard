@@ -1,200 +1,114 @@
-@import url('https://fonts.googleapis.com/css2?family=M+PLUS+1:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;500;700;800&display=swap');
+
+/*
+ * ReplyGuard — motif「リキッド × サイコロ × ジブリ」/ Liquid Glass 採用
+ * パレットは5色（mist / ocean / sage / leaf / sand）＋白のみ．これ以外の色は使わない．
+ * 文字は ocean（最濃）を基本に，暖色 sand は「強調マーカー・面・高重要度の暈し」で効かせる．
+ * サーフェスはリキッドガラス（frosted glass）．ダークモードなし．詳細は DESIGN.md．
+ */
 
 :root {
-  /* Brand */
-  --brand-blue: #1A6ECC;
-  --brand-purple: #5A2EAA;
-  --brand-blue-light: #3A8EFF;
-  --brand-purple-light: #9A6EFF;
-  --brand-gradient: linear-gradient(135deg, #1A6ECC 0%, #5A2EAA 100%);
+  /* ── 5色（確定） ── */
+  --mist:  #E4EBF2;
+  --ocean: #049DBF;
+  --sage:  #AEBFBC;
+  --leaf:  #77BF56;
+  --sand:  #F2D49B;
+  --white: #FFFFFF;
 
-  /* Neutrals */
-  --snow-white: #F6F8FF;
-  --snow-surface: #EAF0FF;
-  --tundra-black: #100C08;
-  --tundra-surface: #2C2016;
+  /* ── ocean の淡色（ocean＋白の混色） ── */
+  --ocean-08: rgba(4, 157, 191, 0.08);
+  --ocean-12: rgba(4, 157, 191, 0.12);
+  --ocean-20: rgba(4, 157, 191, 0.20);
+  --ocean-50: rgba(4, 157, 191, 0.50);
+  --ocean-62: rgba(4, 157, 191, 0.62);
+  --ocean-72: rgba(4, 157, 191, 0.72);
 
-  /* Semantic */
-  --danger: #EA4335;
-  --danger-weak: #FDECEA;
-  --success: #2A7A4A;
-  --success-weak: #E6F4EC;
-  --warning: #B45309;
-  --warning-weak: #FEF3C7;
+  /* ── 色面の淡地（文字は ocean を載せる） ── */
+  --leaf-weak: rgba(119, 191, 86, 0.20);
+  --sand-weak: rgba(242, 212, 155, 0.30);
+  --sage-weak: rgba(174, 191, 188, 0.24);
+  --sand-strong: rgba(242, 212, 155, 0.62);   /* 強調マーカー（subject ハイライト等） */
 
-  /* Typography */
-  --text: #0E0A20;
-  --text-dark: #EEE0CC;
-  --text-muted: #6B6880;
+  /* ── 互換トークン（既存コンポーネント参照名→新パレット） ── */
+  --brand-blue: var(--ocean);
+  --brand-blue-light: var(--ocean-72);
+  --brand-purple: var(--sage);
+  --brand-purple-light: var(--sage);
+  --brand-gradient: linear-gradient(135deg, #049DBF 0%, rgba(4, 157, 191, 0.74) 100%);
 
-  /* UI surfaces */
-  --bg: var(--snow-white);
-  --surface: #FFFFFF;
-  --border: #D0D8F0;
-  --accent: var(--brand-blue);
-  --accent-weak: var(--snow-surface);
+  --snow-white: var(--white);
+  --snow-surface: var(--mist);
+  --tundra-black: var(--ocean);
+  --tundra-surface: var(--mist);
 
-  /* Importance scale using brand palette */
-  --imp-1: #6B6880;
-  --imp-2: var(--brand-blue);
-  --imp-3: #B45309;
-  --imp-4: #C2410C;
-  --imp-5: var(--danger);
+  /* ── 意味色（赤を使わず ocean 塗りで強さを出す） ── */
+  --danger: var(--ocean);
+  --danger-weak: var(--ocean-12);
+  --success: var(--leaf);
+  --success-weak: var(--leaf-weak);
+  --warning: var(--sand);
+  --warning-weak: var(--sand-weak);
 
-  /* Shadows (from style guide) */
-  --shadow-lg: 0 4px 8px rgba(16, 12, 8, 0.15);
-  --shadow-md: 0 4px 8px rgba(16, 12, 8, 0.10);
-  --shadow-sm: 0 2px 4px rgba(16, 12, 8, 0.10);
+  /* ── タイポグラフィ ── */
+  --text: var(--ocean);
+  --text-dark: var(--ocean);
+  --text-muted: var(--ocean);            /* 副次テキストも濃い青に統一 */
 
-  --radius: 8px;
-  --radius-sm: 6px;
-  --radius-pill: 999px;
+  /* ── UI surfaces ── */
+  --bg: var(--mist);
+  --surface: var(--white);
+  --border: rgba(174, 191, 188, 0.55);
+  --accent: var(--ocean);
+  --accent-weak: var(--ocean-12);
+
+  /* ── 重要度ランプ（1-2=灰 / 3-4=青 / 5=緑 / 6=黄） ── */
+  --imp-1: var(--sage);
+  --imp-2: var(--sage);
+  --imp-3: var(--ocean);
+  --imp-4: var(--ocean);
+  --imp-5: var(--leaf);
+  --imp-6: var(--sand);
+
+  /* ══════════ Liquid Glass トークン ══════════ */
+  /* 明るいフロストガラス（既定カード．mist/白の半透明＝ocean文字が読める明surface） */
+  /* 背景との明るさ段差を抑え，白枠（hairline）を薄くして「枠」感を消す */
+  --glass-bg: linear-gradient(145deg, rgba(255,255,255,0.46) 0%, rgba(228,235,242,0.32) 60%, rgba(255,255,255,0.20) 100%);
+  --glass-blur: blur(20px) saturate(150%);
+  --glass-highlight:
+    inset 0 1px 0 rgba(255,255,255,0.45),
+    inset 0 0 16px rgba(255,255,255,0.08);
+  --glass-hairline: 0 0 0 1px rgba(255,255,255,0.18);
+  --glass-shadow: 0 6px 20px rgba(4,157,191,0.12), 0 16px 48px rgba(4,157,191,0.14);
+  --glass-shadow-hover: 0 10px 28px rgba(4,157,191,0.18), 0 26px 64px rgba(4,157,191,0.20);
+  /* ocean ガラス（暖色 sand 文字が映える濃surface＝ヒーロー/重要ゾーン用） */
+  --glass-ocean-bg: linear-gradient(145deg, rgba(4,157,191,0.82) 0%, rgba(4,157,191,0.66) 100%);
+
+  /* ── Elevation（互換：空色のやわらかい影） ── */
+  --shadow-lg: var(--glass-shadow-hover);
+  --shadow-md: 0 12px 32px rgba(4,157,191,0.16), 0 3px 8px rgba(4,157,191,0.08);
+  --shadow-sm: var(--glass-shadow);
+
+  /* ── 角丸（リキッド） ── */
+  --radius: 24px;
+  --radius-sm: 16px;
+  --radius-lg: 30px;
+  --radius-pill: 9999px;
+  --blob: 42% 58% 56% 44% / 56% 44% 56% 44%;
   --gap: 12px;
+
+  /* ── モーション（Apple 級の定番値） ── */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-spring: cubic-bezier(0.32, 1.42, 0.50, 1);   /* 弾みを控えめに（オーバーシュート約半分） */
+  --dur-fast: 240ms;
+  --dur-base: 560ms;
+  --dur-slow: 920ms;
 }
 
-html.dark {
-  --bg: #07050f;
-  --surface: #100d1e;
-  --border: #221e38;
-  --text: #EEE0CC;
-  --text-muted: #8880aa;
-  --accent-weak: #151028;
-  --snow-surface: #100d1e;
-  --snow-white: #07050f;
-  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.7);
-  --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.5);
-  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.5);
-  /* gradient text for logo */
-  --brand-gradient-text: linear-gradient(135deg, #3A8EFF 0%, #9A6EFF 100%);
-}
+* { box-sizing: border-box; }
 
-html.dark .bar {
-  background: #07050f !important;
-  border-bottom: 1px solid #221e38;
-  box-shadow: 0 1px 0 #221e38;
-}
-
-html.dark .logo {
-  background: var(--brand-gradient-text);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-html.dark .tag-line {
-  color: #8880aa;
-}
-
-/* Header buttons on dark need to work against black bg */
-html.dark .refresh,
-html.dark .auto-refresh-btn {
-  border-color: #221e38;
-  background: #100d1e;
-  color: #EEE0CC;
-}
-html.dark .refresh:hover,
-html.dark .auto-refresh-btn:hover {
-  background: #1a1530;
-}
-
-html.dark .ingest {
-  background: var(--brand-gradient-text);
-  color: #fff;
-  -webkit-text-fill-color: #fff;
-}
-
-html.dark .search-input {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: #221e38;
-  color: #EEE0CC;
-}
-html.dark .search-input:focus {
-  background: rgba(255, 255, 255, 0.09);
-  border-color: #3A8EFF;
-}
-html.dark .search-input::placeholder {
-  color: #8880aa;
-}
-
-/* ── Dark mode: semantic colours ── */
-html.dark {
-  --danger-weak: rgba(234, 67, 53, 0.15);
-  --success-weak: rgba(42, 122, 74, 0.15);
-  --warning-weak: rgba(180, 83, 9, 0.15);
-  --danger: #f87171;
-  --success: #4ade80;
-  --warning: #fb923c;
-}
-
-/* ── Dark mode: modal header ── */
-html.dark .modal-header {
-  background: #07050f;
-  border-bottom-color: #221e38;
-}
-html.dark .modal-title {
-  background: linear-gradient(135deg, #3A8EFF 0%, #9A6EFF 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-/* ── Dark mode: tag pills (MessageCard) ── */
-html.dark .tag {
-  background: #1a1530;
-  border-color: #2e2850;
-  color: #8880aa;
-}
-html.dark .tag.reply {
-  color: #3A8EFF;
-  border-color: #1e3a6e;
-  background: rgba(58, 142, 255, 0.12);
-}
-
-/* ── Dark mode: banners ── */
-html.dark .banner--success {
-  background: rgba(42, 122, 74, 0.12);
-  border-color: rgba(74, 222, 128, 0.35);
-  color: #4ade80;
-}
-html.dark .banner--warn {
-  background: rgba(180, 83, 9, 0.12);
-  border-color: rgba(251, 146, 60, 0.35);
-  color: #fb923c;
-}
-
-/* ── Dark mode: state badges ── */
-html.dark .state-unhandled {
-  background: rgba(248, 113, 113, 0.12);
-  border-color: rgba(248, 113, 113, 0.4);
-  color: #f87171;
-}
-html.dark .state-in_progress {
-  background: rgba(58, 142, 255, 0.12);
-  border-color: rgba(58, 142, 255, 0.4);
-  color: #3A8EFF;
-}
-html.dark .state-done {
-  background: rgba(74, 222, 128, 0.1);
-  border-color: rgba(74, 222, 128, 0.35);
-  color: #4ade80;
-}
-html.dark .state-snoozed {
-  background: rgba(251, 146, 60, 0.1);
-  border-color: rgba(251, 146, 60, 0.35);
-  color: #fb923c;
-}
-html.dark .state-dismissed {
-  background: #1a1530;
-  border-color: #2e2850;
-  color: #8880aa;
-}
-
-* {
-  box-sizing: border-box;
-}
-
-html,
-body {
+html, body {
   margin: 0;
   padding: 0;
   height: 100%;
@@ -202,26 +116,147 @@ body {
 }
 
 body {
-  background: var(--bg);
   color: var(--text);
-  font-family: "M PLUS 1", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+  font-family: "M PLUS Rounded 1c", "Hiragino Maru Gothic ProN", "Zen Maru Gothic", Meiryo, sans-serif;
   font-size: 14px;
-  line-height: 1.5;
+  line-height: 1.6;
+  /* 控えめなグラデ地（動くブロブを主役にするため薄めに） */
+  background:
+    radial-gradient(60vw 55vh at 16% 26%, rgba(242, 212, 155, 0.28), transparent 72%),
+    radial-gradient(58vw 52vh at 84% 78%, rgba(4, 157, 191, 0.16), transparent 72%),
+    var(--mist);
+  background-attachment: fixed;
 }
 
-button {
-  font: inherit;
-  cursor: pointer;
-}
+button { font: inherit; cursor: pointer; }
 
 :focus-visible {
-  outline: 2px solid var(--brand-blue);
+  outline: 3px solid rgba(4, 157, 191, 0.55);
   outline-offset: 2px;
 }
 
+/* ══════════════════════════════════════════════════════════
+   リキッドガラス ユーティリティ（グローバル＝scoped 越境で共有）
+   ══════════════════════════════════════════════════════════ */
+.glass {
+  position: relative;
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-highlight), var(--glass-hairline), var(--glass-shadow);
+  border-radius: var(--radius);
+  isolation: isolate;
+}
+/* 上端の鏡面反射ライン */
+.glass::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(to bottom, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.04) 18%, transparent 42%);
+  pointer-events: none;
+  z-index: 0;
+}
+.glass > * { position: relative; z-index: 1; }
+
+.glass--ocean {
+  background: var(--glass-ocean-bg);
+  box-shadow:
+    inset 0 1.5px 0 rgba(255,255,255,0.35),
+    inset 0 0 20px rgba(255,255,255,0.10),
+    0 0 0 1px rgba(255,255,255,0.18),
+    var(--glass-shadow);
+  color: var(--white);
+}
+
+/* backdrop-filter 非対応フォールバック */
+@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .glass { background: rgba(255,255,255,0.88); }
+  .glass--ocean { background: rgba(4,157,191,0.92); }
+}
+
+/* ══════════════════════════════════════════════════════════
+   リキッド背景ブロブ（gooey で漂う・liquid backdrop）
+   App.vue が <div class="bg-blobs"><span class="bg-blob bg-blob--N"/>…</div> を置く
+   ══════════════════════════════════════════════════════════ */
+.bg-blobs {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+/* 丸く漂うブロブ（はっきりめ＝ぼかし控えめ） */
+.bg-blob {
+  position: absolute;
+  width: 46vw;
+  height: 46vw;
+  border-radius: var(--blob);
+  filter: blur(36px);
+  opacity: 0.42;
+  will-change: transform, border-radius;
+}
+.bg-blob--1 { background: var(--sand);  top: 16vh; left: -14vw;    opacity: 0.5;  animation: drift-1 12s ease-in-out infinite; }
+.bg-blob--2 { background: var(--leaf);  top: -18vw; left: 14vw;    opacity: 0.4;  animation: drift-2 15s ease-in-out infinite; }
+.bg-blob--3 { background: var(--sage);  top: 32vh; right: -12vw;   opacity: 0.4;  animation: drift-3 13s ease-in-out infinite; }
+.bg-blob--4 { background: var(--ocean); bottom: -18vw; right: -12vw; opacity: 0.45; animation: drift-1 16s ease-in-out infinite reverse; }
+
+@keyframes drift-1 {
+  0%,100% { transform: translate(0,0) scale(1); border-radius: 42% 58% 56% 44% / 56% 44% 56% 44%; }
+  25%  { transform: translate(11vw,9vh) scale(1.18); border-radius: 60% 40% 42% 58% / 48% 62% 38% 52%; }
+  50%  { transform: translate(4vw,16vh) scale(0.9); border-radius: 34% 66% 62% 38% / 64% 34% 66% 36%; }
+  75%  { transform: translate(-8vw,7vh) scale(1.1); border-radius: 50% 50% 36% 64% / 58% 44% 56% 42%; }
+}
+@keyframes drift-2 {
+  0%,100% { transform: translate(0,0) scale(1); border-radius: 56% 44% 48% 52% / 42% 58% 42% 58%; }
+  33%  { transform: translate(-13vw,-9vh) scale(1.2); border-radius: 40% 60% 58% 42% / 58% 40% 60% 42%; }
+  66%  { transform: translate(-6vw,8vh) scale(0.88); border-radius: 64% 36% 40% 60% / 36% 64% 38% 62%; }
+}
+@keyframes drift-3 {
+  0%,100% { transform: translate(0,0) scale(1); border-radius: 48% 52% 56% 44% / 52% 48% 52% 48%; }
+  30%  { transform: translate(12vw,-8vh) scale(1.16); border-radius: 62% 38% 40% 60% / 44% 56% 44% 56%; }
+  60%  { transform: translate(5vw,11vh) scale(0.86); border-radius: 36% 64% 60% 40% / 62% 38% 60% 40%; }
+  85%  { transform: translate(-7vw,-4vh) scale(1.08); border-radius: 52% 48% 34% 66% / 46% 56% 44% 54%; }
+}
+
+/* ══════════════════════════════════════════════════════════
+   View Transitions（タブ・ルート遷移）
+   ══════════════════════════════════════════════════════════ */
+::view-transition-old(root) { animation: 520ms var(--ease-out-expo) both vt-out; }
+::view-transition-new(root) { animation: 820ms var(--ease-spring) both vt-in; }
+@keyframes vt-out { to { opacity: 0; transform: translateY(-22px) scale(0.97); } }
+@keyframes vt-in  { from { opacity: 0; transform: translateY(34px) scale(0.95); } }
+
+/* ══════════════════════════════════════════════════════════
+   汎用アニメーション・ユーティリティ
+   ══════════════════════════════════════════════════════════ */
+/* スクロール reveal（useReveal composable が .revealed を付与） */
+.reveal {
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity var(--dur-slow) var(--ease-out-expo), transform var(--dur-slow) var(--ease-out-expo);
+}
+.reveal.revealed { opacity: 1; transform: none; }
+
+/* hover で持ち上がる */
+.lift {
+  transition: transform var(--dur-base) var(--ease-standard), box-shadow var(--dur-base) var(--ease-standard);
+  will-change: transform;
+}
+.lift:hover { transform: translateY(-3px); }
+
+/* 入場フェードアップ */
+@keyframes fade-up { from { opacity: 0; transform: translateY(34px) scale(0.95); } to { opacity: 1; transform: none; } }
+@keyframes pop-in  { from { opacity: 0; transform: scale(0.82) translateY(10px); } to { opacity: 1; transform: scale(1); } }
+
+/* ══════════════════════════════════════════════════════════
+   reduced-motion 全停止（0msでイベント発火を保つ）
+   ══════════════════════════════════════════════════════════ */
 @media (prefers-reduced-motion: reduce) {
-  * {
-    transition: none !important;
-    animation: none !important;
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
+  .bg-blobs { display: none; }
 }

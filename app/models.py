@@ -27,6 +27,25 @@ class EmailMessage(BaseModel):
     snippet: str = ""             # 本文先頭のプレビュー
     is_unread: bool = False
     body_text: str | None = None  # LLM 入力用の本文(先頭のみ・任意追加フィールド)
+    is_spam: bool = False          # 取得元プロバイダが迷惑メールに分類していたか(任意追加フィールド)
+    email_category: str | None = None  # Gmail カテゴリ: "primary"/"promotion"/"social"/"update"/"forum"(任意追加フィールド)
+
+
+# 対応区分（LLM が抽出するファクト）.
+# reply_required   : 返信が必要
+# task_required    : 返信以外の作業・タスクが必要
+# review_required  : 内容の確認・レビューが必要
+# approval_required: 承認・決裁が必要
+# waiting_other    : 他者対応待ち・自分のアクションは不要
+# info_only        : 情報共有のみ・対応不要
+RequestType = Literal[
+    "reply_required",
+    "task_required",
+    "review_required",
+    "approval_required",
+    "waiting_other",
+    "info_only",
+]
 
 
 class AnalysisResult(BaseModel):
@@ -34,10 +53,11 @@ class AnalysisResult(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    importance: int = Field(ge=1, le=5)                       # 重要度 1-5
-    needs_reply: bool = False                                 # 対応要否
+    importance: int = Field(ge=1, le=6)                       # 重要度 1-6
     task_weight: Literal["light", "medium", "heavy"] = "light"
-    category: str = "fyi"                                     # 分類ラベル
+    request_type: RequestType = "info_only"                   # 対応区分
+    is_promotional: bool = False                              # 宣伝・広告・メルマガ等か
+    is_security_notification: bool = False                    # セキュリティ通知か（ログイン・パスワード・2FA等）
     summary: str = ""                                         # 要約
     suggested_action: str | None = None
     deadline: datetime | None = None
@@ -73,6 +93,22 @@ class MessageRecord(BaseModel):
     @staticmethod
     def make_id(provider: str, raw_id: str) -> str:
         return f"{provider}:{raw_id}"
+
+
+class FeedbackCorrection(BaseModel):
+    """ユーザーが修正した分析結果（フィードバック入力）.
+
+    現在の予測値をベースにユーザーが変更した値を受け取る.
+    reason はユーザーの修正メモ（LLMプロンプトに注入するため300文字以内）.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    importance: int = Field(ge=1, le=6)
+    request_type: RequestType
+    is_promotional: bool = False
+    is_security_notification: bool = False
+    reason: str = Field(default="", max_length=300)
 
 
 _SUPPORTED_PROVIDERS = {"gmail", "slack", "github"}

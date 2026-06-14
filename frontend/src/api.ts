@@ -1,4 +1,4 @@
-import type { AccountConfig, AccountConfigCreate, MessageRecord, MessageState, OAuthStartResponse } from "./types";
+import type { AccountConfig, AccountConfigCreate, FeedbackCorrection, MessageRecord, MessageState, OAuthStartResponse } from "./types";
 
 const API_BASE = (
   import.meta.env.VITE_API_BASE ?? "http://localhost:8000"
@@ -170,6 +170,22 @@ export async function reauthGmailAccount(accountId: string): Promise<OAuthStartR
     throw new Error((err as { detail?: string }).detail ?? "再接続 URL の取得に失敗しました.");
   }
   return res.json() as Promise<OAuthStartResponse>;
+}
+
+/** 分析結果の修正フィードバックを送信する. */
+export async function submitFeedback(
+  messageId: string,
+  data: FeedbackCorrection,
+): Promise<void> {
+  const url = `${API_BASE}/messages/${encodeURIComponent(messageId)}/feedback`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    throw new ApiError(await parseError(res), res.status);
+  }
 }
 
 /** GitHub OAuth 認証フロー開始. address は不要（認可後に /user から取得）. */

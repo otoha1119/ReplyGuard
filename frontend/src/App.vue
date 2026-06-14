@@ -70,7 +70,7 @@ function updateFavicon(count: number): void {
   canvas.height = 32;
   const ctx = canvas.getContext("2d")!;
   // Base icon: rounded rect + R
-  ctx.fillStyle = "#4F6EF7";
+  ctx.fillStyle = "#049DBF";
   ctx.beginPath();
   ctx.roundRect(0, 0, 32, 32, 6);
   ctx.fill();
@@ -81,10 +81,14 @@ function updateFavicon(count: number): void {
   ctx.fillText("R", 16, 17);
   // Badge dot (bottom-right, no number — tab title already shows count)
   if (count > 0) {
-    ctx.fillStyle = "#EF4444";
+    ctx.fillStyle = "#049DBF";
     ctx.beginPath();
     ctx.arc(26, 26, 5, 0, Math.PI * 2);
     ctx.fill();
+    // White ring to distinguish dot from background
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
   }
   const link = (document.getElementById("favicon") as HTMLLinkElement) ?? document.createElement("link");
   link.id = "favicon";
@@ -98,19 +102,38 @@ watch(unhandledCount, (n) => {
   updateFavicon(n);
 }, { immediate: true });
 
+// 期限の「日付」はユーザーのローカルタイムゾーンで判定する.
+// バックエンドは時刻を UTC で返すため, ISO 文字列の先頭10文字を切り出すと
+// JST など UTC+ の地域では日付が1日前にずれ,「本日中」の期限が誤って
+// 期限切れと判定される. Date でパースしローカル日付へ正規化して比較する.
+function toLocalDateStr(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+function deadlineLocalDate(deadline: string | null | undefined): string | null {
+  if (!deadline) return null;
+  const d = new Date(deadline);
+  return Number.isNaN(d.getTime()) ? deadline.slice(0, 10) : toLocalDateStr(d);
+}
+function localToday(): string {
+  return toLocalDateStr(new Date());
+}
+
 const inboxStats = computed(() => {
   const list = inboxRecords.value;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localToday();
   return {
     total:       list.length,
     unhandled:   list.filter(r => r.state === "unhandled").length,
     in_progress: list.filter(r => r.state === "in_progress").length,
     snoozed:     list.filter(r => r.state === "snoozed").length,
-    needsReply:  list.filter(r => r.analysis?.needs_reply).length,
-    today:       list.filter(r => r.analysis?.deadline?.slice(0, 10) === today).length,
+    needsReply:  list.filter(r => r.analysis?.request_type === "reply_required").length,
+    today:       list.filter(r => deadlineLocalDate(r.analysis?.deadline) === today).length,
     overdue:     list.filter(r => {
-      const d = r.analysis?.deadline?.slice(0, 10);
-      return d !== undefined && d !== null && d < today;
+      const d = deadlineLocalDate(r.analysis?.deadline);
+      return d !== null && d < today;
     }).length,
   };
 });
@@ -139,16 +162,18 @@ const animArchiveInProgress = useAnimatedCount(() => archiveStats.value.in_progr
 const animArchiveSnoozed    = useAnimatedCount(() => archiveStats.value.snoozed);
 
 // --- Quick-filter chips ---
-type SourceChip = "gmail" | "slack" | null;
 type TimeChip = "needs_reply" | "today" | "overdue" | null;
 type StateChip = "unhandled" | "in_progress" | "done" | "snoozed" | "dismissed" | null;
 
-const sourceChip = ref<SourceChip>(null);
+// アカウント絞り込み：アカウント個別（address）の複数選択
+const selectedAccounts = ref<string[]>([]);
 const timeChip = ref<TimeChip>(null);
 const stateChip = ref<StateChip>(null);
 
-function setSourceChip(v: string | null): void {
-  sourceChip.value = v as SourceChip;
+function toggleAccount(address: string): void {
+  selectedAccounts.value = selectedAccounts.value.includes(address)
+    ? selectedAccounts.value.filter((a) => a !== address)
+    : [...selectedAccounts.value, address];
 }
 function toggleTime(chip: TimeChip): void {
   timeChip.value = timeChip.value === chip ? null : chip;
@@ -157,7 +182,7 @@ function toggleState(chip: StateChip): void {
   stateChip.value = stateChip.value === chip ? null : chip;
 }
 function clearChips(): void {
-  sourceChip.value = null;
+  selectedAccounts.value = [];
   timeChip.value = null;
   stateChip.value = null;
 }
@@ -227,19 +252,19 @@ const displayedRecords = computed(() => {
   if (stateChip.value) {
     list = list.filter((r) => r.state === stateChip.value);
   }
-  if (sourceChip.value) {
-    list = list.filter((r) => r.email.provider.toLowerCase() === sourceChip.value);
+  if (selectedAccounts.value.length > 0) {
+    list = list.filter((r) => selectedAccounts.value.includes(r.account_address));
   }
   if (timeChip.value === "needs_reply") {
-    list = list.filter((r) => r.analysis?.needs_reply);
+    list = list.filter((r) => r.analysis?.request_type === "reply_required");
   } else if (timeChip.value === "today") {
-    const today = new Date().toISOString().slice(0, 10);
-    list = list.filter((r) => r.analysis?.deadline?.slice(0, 10) === today);
+    const today = localToday();
+    list = list.filter((r) => deadlineLocalDate(r.analysis?.deadline) === today);
   } else if (timeChip.value === "overdue") {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localToday();
     list = list.filter((r) => {
-      const d = r.analysis?.deadline?.slice(0, 10);
-      return d !== undefined && d !== null && d < today;
+      const d = deadlineLocalDate(r.analysis?.deadline);
+      return d !== null && d < today;
     });
   }
   // Client-side sort
@@ -311,11 +336,18 @@ function onQueryChange(q: MessagesQuery): void {
 
 async function switchTab(tab: Tab): Promise<void> {
   if (activeTab.value === tab) return;
-  activeTab.value = tab;
-  clearChips();
-  clearSelection();
-  const alreadyLoaded = tab === "inbox" ? inboxLoaded.value : archiveLoaded.value;
-  if (!alreadyLoaded) await loadTab(tab);
+  const go = async () => {
+    activeTab.value = tab;
+    clearChips();
+    clearSelection();
+    const alreadyLoaded = tab === "inbox" ? inboxLoaded.value : archiveLoaded.value;
+    if (!alreadyLoaded) await loadTab(tab);
+  };
+  if (document.startViewTransition) {
+    document.startViewTransition(() => go());
+  } else {
+    await go();
+  }
 }
 
 async function onIngest(): Promise<void> {
@@ -373,6 +405,18 @@ async function onChangeState(
     }
   } finally {
     setBusy(record.message_id, false);
+  }
+}
+
+function onFeedbackApplied(record: MessageRecord, patch: Partial<import("./types").AnalysisResult>): void {
+  for (const list of [inboxRecords, archiveRecords]) {
+    const idx = list.value.findIndex((r) => r.message_id === record.message_id);
+    if (idx !== -1 && list.value[idx].analysis) {
+      list.value[idx] = {
+        ...list.value[idx],
+        analysis: { ...list.value[idx].analysis!, ...patch },
+      };
+    }
   }
 }
 
@@ -455,7 +499,7 @@ const emptyLabel = computed(() => {
   if (searchQuery.value) return `"${searchQuery.value}" に一致するメールはありません`;
   if (stateChip.value && STATE_EMPTY_LABELS[stateChip.value]) return STATE_EMPTY_LABELS[stateChip.value]!;
   if (timeChip.value && TIME_EMPTY_LABELS[timeChip.value]) return TIME_EMPTY_LABELS[timeChip.value]!;
-  if (sourceChip.value) return `${sourceChip.value} のメールはありません`;
+  if (selectedAccounts.value.length > 0) return "選択したアカウントのメールはありません";
   return activeTab.value === "inbox" ? "受信トレイは空です" : "アーカイブにメッセージはありません";
 });
 
@@ -578,18 +622,6 @@ function closeDropdown(): void {
   showDropdown.value = false;
 }
 
-// --- Dark mode ---
-const darkMode = ref(localStorage.getItem("theme") === "dark");
-function applyTheme(dark: boolean): void {
-  document.documentElement.classList.toggle("dark", dark);
-  localStorage.setItem("theme", dark ? "dark" : "light");
-}
-function toggleDarkMode(): void {
-  darkMode.value = !darkMode.value;
-  applyTheme(darkMode.value);
-  closeDropdown();
-}
-
 // --- アカウント管理 ---
 const showAccounts = ref(false);
 const hasAccounts = ref<boolean | null>(null);
@@ -629,7 +661,6 @@ function onAccountsChanged(): void {
 }
 
 onMounted(async () => {
-  applyTheme(darkMode.value);
   void load();
   getProviders()
     .then((ps) => { availableProviders.value = ps; })
@@ -666,7 +697,25 @@ onUnmounted(() => {
 
 <template>
   <div class="app">
-    <header class="bar">
+    <!-- gooey SVG フィルタ（同一ドキュメント ID 参照のため直書き） -->
+    <svg width="0" height="0" aria-hidden="true" style="position:absolute;pointer-events:none">
+      <filter id="liquid-goo">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="10" result="blur"/>
+        <feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 20 -9" result="goo"/>
+        <feBlend in="SourceGraphic" in2="goo"/>
+      </filter>
+    </svg>
+
+    <!-- リキッド背景ブロブ（styles.css の .bg-blobs/.bg-blob--N を使用） -->
+    <div class="bg-blobs" aria-hidden="true">
+      <span class="bg-blob bg-blob--1"></span>
+      <span class="bg-blob bg-blob--2"></span>
+      <span class="bg-blob bg-blob--3"></span>
+      <span class="bg-blob bg-blob--4"></span>
+    </div>
+
+    <!-- ヘッダー：浮遊ガラスバー -->
+    <header class="bar glass">
       <div class="brand">
         <span class="logo">ReplyGuard</span>
         <span class="tag-line">受信トレイ管制塔</span>
@@ -699,7 +748,7 @@ onUnmounted(() => {
       <div class="bar-right">
         <button
           type="button"
-          class="ingest"
+          class="ingest lift"
           :class="{ 'ingest--spinning': ingesting }"
           :disabled="loading || ingesting"
           :title="ingesting ? '同期中…' : '手動でメールを取り込む'"
@@ -724,61 +773,52 @@ onUnmounted(() => {
             @click="toggleDropdown"
           >
             <svg width="32" height="32" viewBox="0 0 32 32" fill="none" aria-hidden="true">
-              <circle cx="16" cy="16" r="16" fill="rgba(255,255,255,0.2)"/>
+              <circle cx="16" cy="16" r="16" fill="var(--ocean)"/>
               <circle cx="16" cy="13" r="5" fill="rgba(255,255,255,0.9)"/>
               <path d="M6 28c0-5.5 4.5-9 10-9s10 3.5 10 9" fill="rgba(255,255,255,0.9)"/>
             </svg>
           </button>
 
-          <div v-if="showDropdown" class="dropdown" role="menu">
-            <div class="dropdown-section">
-              <button class="dropdown-item" role="menuitem" @click="showAccounts = true; closeDropdown()">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <circle cx="12" cy="8" r="4"/>
-                  <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
-                </svg>
-                アカウント設定
-              </button>
-              <button class="dropdown-item" role="menuitem" @click="toggleDarkMode">
-                <svg v-if="!darkMode" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
-                </svg>
-                <svg v-else width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <circle cx="12" cy="12" r="5"/>
-                  <line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>
-                  <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
-                  <line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/>
-                  <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
-                </svg>
-                {{ darkMode ? 'ライトモード' : 'ダークモード' }}
-              </button>
-              <button class="dropdown-item" role="menuitem" @click="toggleAutoRefresh(); closeDropdown()">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M21 12a9 9 0 1 1-3-6.7"/>
-                  <polyline points="21 3 21 9 15 9"/>
-                </svg>
-                自動更新：{{ autoRefresh ? 'オン' : 'オフ' }}
-                <span class="dropdown-dot" :class="{ on: autoRefresh }" aria-hidden="true" />
-              </button>
+          <!-- ドロップダウン：ガラス化 -->
+          <Transition name="dropdown">
+            <div v-if="showDropdown" class="dropdown glass" role="menu">
+              <div class="dropdown-section">
+                <button class="dropdown-item" role="menuitem" @click="showAccounts = true; closeDropdown()">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="8" r="4"/>
+                    <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
+                  </svg>
+                  アカウント設定
+                </button>
+                <button class="dropdown-item" role="menuitem" @click="toggleAutoRefresh(); closeDropdown()">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M21 12a9 9 0 1 1-3-6.7"/>
+                    <polyline points="21 3 21 9 15 9"/>
+                  </svg>
+                  自動更新：{{ autoRefresh ? 'オン' : 'オフ' }}
+                  <span class="dropdown-dot" :class="{ on: autoRefresh }" aria-hidden="true" />
+                </button>
+              </div>
+              <div class="dropdown-divider" />
+              <div class="dropdown-section">
+                <button class="dropdown-item dropdown-item--danger" role="menuitem" @click="closeDropdown">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                    <polyline points="16 17 21 12 16 7"/>
+                    <line x1="21" y1="12" x2="9" y2="12"/>
+                  </svg>
+                  ログアウト
+                </button>
+              </div>
             </div>
-            <div class="dropdown-divider" />
-            <div class="dropdown-section">
-              <button class="dropdown-item dropdown-item--danger" role="menuitem" @click="closeDropdown">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-                  <polyline points="16 17 21 12 16 7"/>
-                  <line x1="21" y1="12" x2="9" y2="12"/>
-                </svg>
-                ログアウト
-              </button>
-            </div>
-          </div>
+          </Transition>
         </div>
       </div>
     </header>
 
     <div class="app-body">
-    <nav class="tabs" role="tablist" aria-label="メールビュー切り替え">
+    <!-- タブ：セグメンテッド風ガラスコントロール -->
+    <nav class="tabs glass" role="tablist" aria-label="メールビュー切り替え">
       <button
         role="tab"
         :aria-selected="activeTab === 'inbox'"
@@ -820,16 +860,16 @@ onUnmounted(() => {
           :model-value="{ ...(activeTab === 'inbox' ? inboxQuery : archiveQuery), order_by: sortOrderBy, descending: sortDescending }"
           :providers="availableProviders"
           :accounts="accountsList"
-          :source-chip="sourceChip"
+          :selected-accounts="selectedAccounts"
           @update:model-value="onQueryChange"
-          @update:source-chip="setSourceChip"
+          @toggle-account="toggleAccount"
         />
         </div>
       </aside>
 
       <div ref="scrollContainer" class="content">
-      <!-- Stats row -->
-      <div v-if="(activeTab === 'inbox' && inboxStats.total > 0) || (activeTab === 'archive' && archiveStats.total > 0) || selectedIds.size > 0" class="stats-row">
+      <!-- Stats row：ガラスカード化（主要 stat は glass--ocean ヒーロー） -->
+      <div v-if="(activeTab === 'inbox' && inboxStats.total > 0) || (activeTab === 'archive' && archiveStats.total > 0) || selectedIds.size > 0" class="stats-row glass">
         <label class="select-all-wrap" :title="selectedIds.size === displayedRecords.length ? '選択解除' : 'すべて選択'">
           <input
             type="checkbox"
@@ -847,28 +887,30 @@ onUnmounted(() => {
             <span class="stat-label">件</span>
           </div>
           <div class="stat-sep" />
-          <button type="button" class="stat stat-btn" :class="{ 'stat-btn--active': stateChip === 'unhandled' }" @click="toggleState('unhandled')">
+          <!-- 未対応：glass--ocean ヒーロー化 -->
+          <button type="button" class="stat stat-btn stat-btn--hero" :class="{ 'stat-btn--active': stateChip === 'unhandled', 'stat-btn--hero-on': inboxStats.unhandled > 0 }" @click="toggleState('unhandled')">
             <span class="stat-value">{{ animUnhandled }}</span>
             <span class="stat-label">未対応</span>
           </button>
-          <button type="button" class="stat stat-btn stat-btn--blue" :class="{ 'stat-btn--active': stateChip === 'in_progress' }" @click="toggleState('in_progress')">
+          <button type="button" class="stat stat-btn stat-btn--sand" :class="{ 'stat-btn--active': stateChip === 'in_progress' }" @click="toggleState('in_progress')">
             <span class="stat-value">{{ animInProgress }}</span>
             <span class="stat-label">対応中</span>
           </button>
-          <button type="button" class="stat stat-btn stat-btn--warn" :class="{ 'stat-btn--active': stateChip === 'snoozed' }" @click="toggleState('snoozed')">
+          <button type="button" class="stat stat-btn stat-btn--sage" :class="{ 'stat-btn--active': stateChip === 'snoozed' }" @click="toggleState('snoozed')">
             <span class="stat-value">{{ animSnoozed }}</span>
             <span class="stat-label">保留</span>
           </button>
           <div class="stat-sep" />
-          <button type="button" class="stat stat-btn" :class="{ 'stat-btn--active': timeChip === 'needs_reply', 'stat-btn--warn': inboxStats.needsReply > 0 }" @click="toggleTime('needs_reply')">
+          <button type="button" class="stat stat-btn" :class="{ 'stat-btn--active': timeChip === 'needs_reply' }" @click="toggleTime('needs_reply')">
             <span class="stat-value">{{ animNeedsReply }}</span>
             <span class="stat-label">要返信</span>
           </button>
-          <button type="button" class="stat stat-btn" :class="{ 'stat-btn--active': timeChip === 'today', 'stat-btn--blue': inboxStats.today > 0 }" @click="toggleTime('today')">
+          <button type="button" class="stat stat-btn" :class="{ 'stat-btn--active': timeChip === 'today' }" @click="toggleTime('today')">
             <span class="stat-value">{{ animToday }}</span>
             <span class="stat-label">今日期限</span>
           </button>
-          <button type="button" class="stat stat-btn" :class="{ 'stat-btn--active': timeChip === 'overdue', 'stat-btn--danger': inboxStats.overdue > 0 }" @click="toggleTime('overdue')">
+          <!-- 期限切れ：ocean 塗り反転で最強シグナル -->
+          <button type="button" class="stat stat-btn stat-btn--overdue" :class="{ 'stat-btn--active': timeChip === 'overdue', 'stat-btn--overdue-active': inboxStats.overdue > 0 }" @click="toggleTime('overdue')">
             <span class="stat-value">{{ animOverdue }}</span>
             <span class="stat-label">期限切れ</span>
           </button>
@@ -881,15 +923,15 @@ onUnmounted(() => {
             <span class="stat-label">件</span>
           </div>
           <div class="stat-sep" />
-          <button type="button" class="stat stat-btn stat-btn--success" :class="{ 'stat-btn--active': stateChip === 'done' }" @click="toggleState('done')">
+          <button type="button" class="stat stat-btn stat-btn--leaf" :class="{ 'stat-btn--active': stateChip === 'done' }" @click="toggleState('done')">
             <span class="stat-value">{{ animArchiveDone }}</span>
             <span class="stat-label">完了</span>
           </button>
-          <button type="button" class="stat stat-btn stat-btn--blue" :class="{ 'stat-btn--active': stateChip === 'in_progress' }" @click="toggleState('in_progress')">
+          <button type="button" class="stat stat-btn stat-btn--sand" :class="{ 'stat-btn--active': stateChip === 'in_progress' }" @click="toggleState('in_progress')">
             <span class="stat-value">{{ animArchiveInProgress }}</span>
             <span class="stat-label">対応中</span>
           </button>
-          <button type="button" class="stat stat-btn stat-btn--warn" :class="{ 'stat-btn--active': stateChip === 'snoozed' }" @click="toggleState('snoozed')">
+          <button type="button" class="stat stat-btn stat-btn--sage" :class="{ 'stat-btn--active': stateChip === 'snoozed' }" @click="toggleState('snoozed')">
             <span class="stat-value">{{ animArchiveSnoozed }}</span>
             <span class="stat-label">保留</span>
           </button>
@@ -902,15 +944,15 @@ onUnmounted(() => {
             <span class="stat-label">件選択中</span>
           </div>
           <div class="stat-sep" />
-          <button type="button" class="bulk-btn bulk-btn--blue" @click="bulkChangeState('in_progress')">
+          <button type="button" class="bulk-btn bulk-btn--sand" @click="bulkChangeState('in_progress')">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
             対応中
           </button>
-          <button type="button" class="bulk-btn bulk-btn--success" @click="bulkChangeState('done')">
+          <button type="button" class="bulk-btn bulk-btn--leaf" @click="bulkChangeState('done')">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
             完了
           </button>
-          <button type="button" class="bulk-btn bulk-btn--warn" @click="bulkChangeState('snoozed')">
+          <button type="button" class="bulk-btn bulk-btn--sage" @click="bulkChangeState('snoozed')">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
             保留
           </button>
@@ -931,19 +973,19 @@ onUnmounted(() => {
             <span class="stat-label">件選択中</span>
           </div>
           <div class="stat-sep" />
-          <button type="button" class="bulk-btn bulk-btn--blue" @click="bulkChangeState('in_progress')">
+          <button type="button" class="bulk-btn bulk-btn--sand" @click="bulkChangeState('in_progress')">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
             対応中
           </button>
-          <button type="button" class="bulk-btn bulk-btn--success" @click="bulkChangeState('done')">
+          <button type="button" class="bulk-btn bulk-btn--leaf" @click="bulkChangeState('done')">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
             完了
           </button>
-          <button type="button" class="bulk-btn bulk-btn--warn" @click="bulkChangeState('snoozed')">
+          <button type="button" class="bulk-btn bulk-btn--sage" @click="bulkChangeState('snoozed')">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
             保留
           </button>
-          <button type="button" class="bulk-btn bulk-btn--purple" @click="bulkUnarchive()">
+          <button type="button" class="bulk-btn bulk-btn--sage" @click="bulkUnarchive()">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><polyline points="9 12 12 9 15 12"/><line x1="12" y1="9" x2="12" y2="15"/></svg>
             受信トレイに戻す
           </button>
@@ -973,7 +1015,7 @@ onUnmounted(() => {
       </div>
 
       <!-- reauth_required バナー (inline — needs action button) -->
-      <div v-if="reauthAccounts.length" class="banner banner--warn">
+      <div v-if="reauthAccounts.length" class="banner banner--warn glass">
         {{ reauthAccounts.length }} 件のアカウントで Google 認証の更新が必要です．
         <button
           v-for="acc in reauthAccounts"
@@ -982,59 +1024,72 @@ onUnmounted(() => {
         >{{ acc.label }} を再接続</button>
       </div>
 
+      <!-- ローディング・空状態（ガラスパネル内） -->
       <div v-if="loading && displayedRecords.length === 0" class="empty-state">
-        <svg class="empty-illustration dice-spin" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-          <circle cx="60" cy="60" r="48" fill="var(--snow-surface)"/>
-          <!-- dice body -->
-          <rect x="34" y="34" width="52" height="52" rx="10" fill="var(--brand-blue)"/>
-          <!-- dots: die face showing 4 -->
-          <circle cx="47" cy="47" r="4.5" fill="white"/>
-          <circle cx="73" cy="47" r="4.5" fill="white"/>
-          <circle cx="47" cy="73" r="4.5" fill="white"/>
-          <circle cx="73" cy="73" r="4.5" fill="white"/>
-        </svg>
-        <p class="empty-label">読み込み中…</p>
+        <div class="empty-panel glass">
+          <svg class="empty-illustration dice-spin" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <circle cx="60" cy="60" r="48" fill="var(--mist)"/>
+            <!-- dice body -->
+            <rect x="34" y="34" width="52" height="52" rx="10" fill="var(--ocean)"/>
+            <!-- dots: die face showing 4 -->
+            <circle cx="47" cy="47" r="4.5" fill="white"/>
+            <circle cx="73" cy="47" r="4.5" fill="white"/>
+            <circle cx="47" cy="73" r="4.5" fill="white"/>
+            <circle cx="73" cy="73" r="4.5" fill="white"/>
+          </svg>
+          <p class="empty-label">読み込み中…</p>
+        </div>
       </div>
 
       <div
         v-else-if="!loading && displayedRecords.length === 0 && hasAccounts === false"
         class="empty-state"
       >
-        <svg class="empty-illustration" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-          <circle cx="60" cy="60" r="48" fill="var(--snow-surface)"/>
-          <rect x="28" y="38" width="64" height="44" rx="5" fill="var(--border)"/>
-          <path d="M28 43l32 22 32-22" stroke="var(--surface)" stroke-width="2.5" stroke-linecap="round"/>
-          <line x1="44" y1="70" x2="76" y2="70" stroke="var(--surface)" stroke-width="2.5" stroke-linecap="round"/>
-          <line x1="44" y1="76" x2="64" y2="76" stroke="var(--surface)" stroke-width="2.5" stroke-linecap="round"/>
-          <circle cx="84" cy="36" r="12" fill="var(--brand-blue)"/>
-          <line x1="84" y1="31" x2="84" y2="41" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-          <line x1="79" y1="36" x2="89" y2="36" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-        </svg>
-        <p class="empty-label">アカウントが設定されていません</p>
-        <button type="button" class="btn-add-account" @click="showAccounts = true">
-          アカウントを追加
-        </button>
+        <div class="empty-panel glass">
+          <svg class="empty-illustration" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <circle cx="60" cy="60" r="48" fill="var(--mist)"/>
+            <rect x="28" y="38" width="64" height="44" rx="5" fill="var(--sage-weak)"/>
+            <path d="M28 43l32 22 32-22" stroke="var(--white)" stroke-width="2.5" stroke-linecap="round"/>
+            <line x1="44" y1="70" x2="76" y2="70" stroke="var(--white)" stroke-width="2.5" stroke-linecap="round"/>
+            <line x1="44" y1="76" x2="64" y2="76" stroke="var(--white)" stroke-width="2.5" stroke-linecap="round"/>
+            <circle cx="84" cy="36" r="12" fill="var(--ocean)"/>
+            <line x1="84" y1="31" x2="84" y2="41" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+            <line x1="79" y1="36" x2="89" y2="36" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+          </svg>
+          <p class="empty-label">アカウントが設定されていません</p>
+          <button type="button" class="btn-add-account lift" @click="showAccounts = true">
+            アカウントを追加
+          </button>
+        </div>
       </div>
 
       <div
         v-else-if="!loading && displayedRecords.length === 0"
         class="empty-state"
       >
-        <svg class="empty-illustration" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-          <circle cx="60" cy="60" r="48" fill="var(--snow-surface)"/>
-          <rect x="28" y="38" width="64" height="44" rx="5" fill="var(--border)"/>
-          <path d="M28 43l32 22 32-22" stroke="var(--surface)" stroke-width="2.5" stroke-linecap="round"/>
-          <line x1="44" y1="70" x2="76" y2="70" stroke="var(--surface)" stroke-width="2.5" stroke-linecap="round"/>
-          <line x1="44" y1="76" x2="64" y2="76" stroke="var(--surface)" stroke-width="2.5" stroke-linecap="round"/>
-          <circle cx="84" cy="36" r="12" fill="var(--success)"/>
-          <polyline points="79,36 83,40 90,32" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-        <p class="empty-label">{{ emptyLabel }}</p>
-        <button v-if="stateChip || timeChip || sourceChip || searchQuery" type="button" class="empty-clear-btn" @click="clearChips(); searchQuery = ''">フィルターをクリア</button>
-        <p class="empty-sub" v-else-if="activeTab === 'inbox'">「同期」で新しいメールを取り込めます。</p>
+        <div class="empty-panel glass">
+          <svg class="empty-illustration" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <circle cx="60" cy="60" r="48" fill="var(--mist)"/>
+            <rect x="28" y="38" width="64" height="44" rx="5" fill="var(--sage-weak)"/>
+            <path d="M28 43l32 22 32-22" stroke="var(--white)" stroke-width="2.5" stroke-linecap="round"/>
+            <line x1="44" y1="70" x2="76" y2="70" stroke="var(--white)" stroke-width="2.5" stroke-linecap="round"/>
+            <line x1="44" y1="76" x2="64" y2="76" stroke="var(--white)" stroke-width="2.5" stroke-linecap="round"/>
+            <circle cx="84" cy="36" r="12" fill="var(--leaf)"/>
+            <polyline points="79,36 83,40 90,32" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <p class="empty-label">{{ emptyLabel }}</p>
+          <button v-if="stateChip || timeChip || selectedAccounts.length || searchQuery" type="button" class="empty-clear-btn" @click="clearChips(); searchQuery = ''">フィルターをクリア</button>
+          <p class="empty-sub" v-else-if="activeTab === 'inbox'">「同期」で新しいメールを取り込めます。</p>
+        </div>
       </div>
 
-      <div v-else class="list">
+      <!-- メッセージリスト：TransitionGroup FLIP + stagger -->
+      <TransitionGroup
+        v-else
+        tag="div"
+        name="list"
+        class="list"
+      >
         <MessageCard
           v-for="(r, i) in displayedRecords"
           :key="r.message_id"
@@ -1045,13 +1100,15 @@ onUnmounted(() => {
           :focused="focusedIndex === i"
           :selected="selectedIds.has(r.message_id)"
           :search-query="searchQuery"
+          :style="{ '--i': Math.min(i, 10) }"
           @change-state="(s) => onChangeState(r, s)"
           @archive="onArchive(r)"
           @unarchive="onUnarchive(r)"
+          @feedback-applied="(patch) => onFeedbackApplied(r, patch)"
           @click="focusedIndex = -1"
           @toggle-select="toggleSelect(r.message_id)"
         />
-      </div>
+      </TransitionGroup>
       </div>
     </main>
 
@@ -1066,7 +1123,7 @@ onUnmounted(() => {
     <Teleport to="body">
       <Transition name="modal">
         <div v-if="showShortcuts" class="shortcuts-backdrop" @click.self="showShortcuts = false">
-          <div class="shortcuts-modal" role="dialog" aria-modal="true" aria-label="キーボードショートカット">
+          <div class="shortcuts-modal glass" role="dialog" aria-modal="true" aria-label="キーボードショートカット">
             <div class="shortcuts-header">
               <span class="shortcuts-title">キーボードショートカット</span>
               <button type="button" class="shortcuts-close" aria-label="閉じる" @click="showShortcuts = false">
@@ -1105,13 +1162,13 @@ onUnmounted(() => {
 
     <ToastContainer />
 
-    <!-- Jump to top -->
+    <!-- Jump to top：白ガラス丸 + ocean -->
     <Teleport to="body">
       <Transition name="scroll-top">
         <button
           v-if="showScrollTop"
           type="button"
-          class="scroll-top-btn"
+          class="scroll-top-btn glass lift"
           aria-label="トップへ戻る"
           @click="scrollToTop"
         >
@@ -1130,6 +1187,8 @@ onUnmounted(() => {
   flex-direction: column;
   height: 100vh;
   overflow: hidden;
+  position: relative;
+  z-index: 0;
 }
 
 .app-body {
@@ -1142,21 +1201,24 @@ onUnmounted(() => {
   width: 100%;
   margin: 0 auto;
   box-sizing: border-box;
+  position: relative;
+  z-index: 1;
 }
 
-/* ── Header bar ── */
+/* ── Header bar：浮遊ガラスバー（glass クラスはグローバル） ── */
 .bar {
   flex-shrink: 0;
   z-index: 10;
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   padding: 0 20px;
   height: 56px;
-  background: var(--brand-gradient);
-  box-shadow: var(--shadow-lg);
-  width: 100%;
+  margin: 10px 16px 0;
+  /* glass クラスで background/backdrop-filter/box-shadow/border-radius を上書き */
+  border-radius: var(--radius) !important;
 }
 
 .brand {
@@ -1167,12 +1229,12 @@ onUnmounted(() => {
 .logo {
   font-size: 20px;
   font-weight: 800;
-  color: #fff;
+  color: var(--ocean);
   letter-spacing: -0.3px;
 }
 .tag-line {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--text-muted);
 }
 
 .search-wrap {
@@ -1185,24 +1247,26 @@ onUnmounted(() => {
 .search-icon {
   position: absolute;
   left: 10px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-muted);
   pointer-events: none;
 }
 .search-input {
   width: 100%;
   padding: 6px 12px 6px 32px;
   border-radius: var(--radius-pill);
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  background: rgba(255, 255, 255, 0.15);
-  color: #fff;
+  border: 1.5px solid var(--border);
+  background: rgba(228, 235, 242, 0.55);
+  color: var(--ocean);
   font: inherit;
   font-size: 13px;
   outline: none;
+  transition: border-color 0.15s, background 0.15s;
 }
-.search-input::placeholder { color: rgba(255, 255, 255, 0.55); }
+.search-input::placeholder { color: var(--text-muted); }
 .search-input:focus {
-  background: rgba(255, 255, 255, 0.25);
-  border-color: rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.80);
+  border-color: var(--ocean);
+  box-shadow: 0 0 0 3px var(--ocean-12);
 }
 .search-clear {
   position: absolute;
@@ -1210,12 +1274,20 @@ onUnmounted(() => {
   background: none;
   border: none;
   padding: 2px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--text-muted);
   display: flex;
   align-items: center;
   cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease-out-expo),
+    transform var(--dur-fast) var(--ease-spring),
+    opacity var(--dur-fast) var(--ease-out-expo);
 }
-.search-clear:hover { color: #fff; }
+.search-clear:hover {
+  color: var(--ocean);
+  transform: scale(1.15);
+}
+.search-clear:active { transform: scale(0.9); }
 
 .bar-right {
   display: flex;
@@ -1227,7 +1299,7 @@ onUnmounted(() => {
   position: relative;
   display: flex;
   align-items: center;
-  margin-left: 16px;
+  margin-left: 8px;
 }
 .accounts-btn {
   background: none;
@@ -1237,22 +1309,28 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   line-height: 0;
-  opacity: 0.85;
+  opacity: 0.9;
+  border-radius: 50%;
+  transition:
+    opacity var(--dur-fast) var(--ease-out-expo),
+    box-shadow var(--dur-fast) var(--ease-out-expo),
+    transform var(--dur-fast) var(--ease-spring);
 }
 .accounts-btn:hover {
   opacity: 1;
+  box-shadow: 0 0 0 3px var(--ocean-12);
+  transform: scale(1.1);
 }
+.accounts-btn:active { transform: scale(0.9); }
 
-/* ── Dropdown ── */
+/* ── Dropdown：ガラス化 ── */
 .dropdown {
   position: absolute;
   top: calc(100% + 10px);
   right: 0;
   min-width: 210px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-lg);
+  /* glass クラスのみに依存：background/backdrop/shadow/radius を上書きしない */
+  border-radius: var(--radius-sm) !important;
   z-index: 200;
   overflow: hidden;
 }
@@ -1272,20 +1350,29 @@ onUnmounted(() => {
   padding: 9px 16px;
   font-size: 13px;
   font-weight: 500;
-  color: var(--text);
+  color: var(--ocean);
   background: none;
   border: none;
   text-align: left;
   cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease-out-expo),
+    transform var(--dur-fast) var(--ease-out-expo),
+    color var(--dur-fast) var(--ease-out-expo);
 }
 .dropdown-item:hover {
-  background: var(--snow-surface);
+  background: rgba(228, 235, 242, 0.60);
+  transform: translateX(2px);
 }
+.dropdown-item:hover > svg:first-child {
+  transform: translateX(0);
+}
+.dropdown-item:active { transform: translateX(2px) scale(0.98); }
 .dropdown-item--danger {
-  color: var(--danger);
+  color: var(--ocean);
 }
 .dropdown-item--danger:hover {
-  background: var(--danger-weak);
+  background: var(--ocean-12);
 }
 .dropdown-dot {
   margin-left: auto;
@@ -1294,30 +1381,53 @@ onUnmounted(() => {
   border-radius: 50%;
   background: var(--border);
   flex-shrink: 0;
+  transition: background 0.2s, box-shadow 0.2s;
 }
 .dropdown-dot.on {
-  background: #4ade80;
-  box-shadow: 0 0 4px #4ade80;
+  background: var(--leaf);
+  box-shadow: 0 0 5px rgba(119, 191, 86, 0.6);
 }
+
+/* ── ドロップダウン Transition ── */
+.dropdown-enter-active, .dropdown-leave-active {
+  transition: opacity var(--dur-fast) var(--ease-out-expo), transform var(--dur-fast) var(--ease-out-expo);
+}
+.dropdown-enter-from, .dropdown-leave-to {
+  opacity: 0;
+  transform: translateY(-6px) scale(0.97);
+}
+
+/* ── 同期ボタン（ocean 塗り・pill・lift） ── */
 .ingest {
   font-size: 13px;
-  padding: 0 14px;
-  height: 38px;
-  width: 110px;
+  padding: 0 16px;
+  height: 36px;
+  width: 100px;
   white-space: nowrap;
-  border-radius: var(--radius);
+  border-radius: var(--radius-pill);
   border: none;
-  background: #fff;
-  color: var(--brand-blue);
+  background: var(--ocean);
+  color: var(--white);
   font-weight: 600;
   box-shadow: var(--shadow-sm);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  line-height: 38px;
+  line-height: 36px;
   vertical-align: middle;
+  transition:
+    background var(--dur-fast) var(--ease-out-expo),
+    box-shadow var(--dur-fast) var(--ease-out-expo),
+    transform var(--dur-fast) var(--ease-spring),
+    color var(--dur-fast) var(--ease-out-expo);
 }
+.ingest:hover:not(:disabled) {
+  background: var(--ocean-72);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px) scale(1.02);
+}
+.ingest:active:not(:disabled) { transform: scale(0.97); }
 .ingest:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -1342,43 +1452,60 @@ onUnmounted(() => {
   transform-origin: center;
 }
 
-/* ── Tabs ── */
+/* ── Tabs：セグメンテッド風ガラスコントロール ── */
 .tabs {
   display: flex;
-  border-bottom: 1px solid var(--border);
-  margin-top: 16px;
+  margin-top: 14px;
+  position: relative;
+  z-index: 1;
+  padding: 4px 4px;
+  gap: 2px;
+  /* border-radius は glass から：var(--radius) */
 }
 .tab {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 10px 18px;
+  padding: 8px 20px;
   font-size: 14px;
   font-weight: 500;
   color: var(--text-muted);
   background: none;
   border: none;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
+  border-radius: calc(var(--radius) - 4px);
   cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease-out-expo),
+    background var(--dur-fast) var(--ease-out-expo),
+    transform var(--dur-fast) var(--ease-spring),
+    box-shadow var(--dur-fast) var(--ease-out-expo);
+  position: relative;
 }
 .tab:hover {
-  color: var(--text);
+  color: var(--ocean);
+  background: rgba(255, 255, 255, 0.45);
+  transform: scale(1.03);
 }
+.tab:active { transform: scale(0.94); }
 .tab.active {
-  color: var(--brand-blue);
-  border-bottom-color: var(--brand-blue);
-  font-weight: 600;
+  color: var(--white);
+  background: var(--ocean);
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgba(4, 157, 191, 0.30);
 }
 .tab-badge {
   font-size: 11px;
   font-weight: 700;
-  background: var(--danger);
-  color: #fff;
+  background: var(--white);
+  color: var(--ocean);
   border-radius: var(--radius-pill);
   padding: 1px 6px;
   min-width: 18px;
   text-align: center;
+}
+.tab.active .tab-badge {
+  background: rgba(255, 255, 255, 0.25);
+  color: var(--white);
 }
 
 /* ── Quick-filter chips ── */
@@ -1397,29 +1524,35 @@ onUnmounted(() => {
   cursor: pointer;
   white-space: nowrap;
   opacity: 0.6;
+  transition:
+    opacity var(--dur-fast) var(--ease-out-expo),
+    color var(--dur-fast) var(--ease-out-expo),
+    transform var(--dur-fast) var(--ease-spring);
 }
 .density-btn:hover {
   opacity: 1;
-  color: var(--text);
+  color: var(--ocean);
+  transform: scale(1.1);
 }
+.density-btn:active { transform: scale(0.9); }
 .chip {
   font-size: 12px;
   font-weight: 500;
   padding: 4px 12px;
   border-radius: var(--radius-pill);
   border: 1px solid var(--border);
-  background: var(--surface);
+  background: rgba(255, 255, 255, 0.50);
   color: var(--text-muted);
   cursor: pointer;
 }
 .chip:hover {
-  border-color: var(--brand-blue);
-  color: var(--brand-blue);
+  border-color: var(--ocean);
+  color: var(--ocean);
 }
 .chip.active {
-  background: var(--brand-blue);
-  border-color: var(--brand-blue);
-  color: #fff;
+  background: var(--ocean);
+  border-color: var(--ocean);
+  color: var(--white);
   font-weight: 600;
 }
 
@@ -1435,9 +1568,12 @@ onUnmounted(() => {
   min-height: 0;
 }
 
+/* ── Sidebar ── */
 .sidebar {
   position: sticky;
   top: 16px;
+  border-right: 1px solid var(--border);
+  padding-right: 16px;
 }
 
 .sidebar-toggle {
@@ -1453,11 +1589,17 @@ onUnmounted(() => {
   cursor: pointer;
   opacity: 0.6;
   margin-bottom: 4px;
+  transition:
+    opacity var(--dur-fast) var(--ease-out-expo),
+    color var(--dur-fast) var(--ease-out-expo),
+    transform var(--dur-fast) var(--ease-spring);
 }
 .sidebar-toggle:hover {
   opacity: 1;
-  color: var(--text);
+  color: var(--ocean);
+  transform: scale(1.05);
 }
+.sidebar-toggle:active { transform: scale(0.95); }
 
 .sidebar-content {
   overflow: hidden;
@@ -1472,6 +1614,8 @@ onUnmounted(() => {
 }
 .main--collapsed .sidebar {
   width: auto;
+  border-right: none;
+  padding-right: 0;
 }
 
 .content {
@@ -1479,42 +1623,47 @@ onUnmounted(() => {
   height: 100%;
   overflow-y: auto;
   overflow-x: hidden;
-  padding-bottom: 48px;
-  padding-right: 4px;
+  /* 右にスクロールバーが出るため，カードとバーの間に余白を多めに取る */
+  padding: 6px 22px 48px 14px;
 }
 
-/* Scroll to top */
+/* ── Scroll to top：白ガラス丸 + ocean ── */
 .scroll-top-btn {
   position: fixed;
   bottom: 24px;
   right: 24px;
-  width: 38px;
-  height: 38px;
-  border-radius: 50%;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--text-muted);
-  box-shadow: var(--shadow-md);
+  width: 44px;
+  height: 44px;
+  border-radius: 50% !important;
+  border: none;
+  color: var(--ocean);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   z-index: 500;
-  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  transition:
+    background var(--dur-fast) var(--ease-out-expo),
+    color var(--dur-fast) var(--ease-out-expo),
+    transform var(--dur-fast) var(--ease-spring),
+    box-shadow var(--dur-fast) var(--ease-out-expo);
 }
 .scroll-top-btn:hover {
-  color: var(--brand-blue);
-  border-color: var(--brand-blue);
-  background: var(--accent-weak);
+  background: var(--ocean) !important;
+  color: var(--white);
+  transform: translateY(-2px) scale(1.1);
+  box-shadow: 0 6px 20px rgba(4, 157, 191, 0.30);
 }
+.scroll-top-btn:active { transform: scale(0.9); }
 .scroll-top-enter-active, .scroll-top-leave-active {
-  transition: opacity 0.2s ease, transform 0.2s ease;
+  transition: opacity var(--dur-fast) var(--ease-standard), transform var(--dur-fast) var(--ease-standard);
 }
 .scroll-top-enter-from, .scroll-top-leave-to {
   opacity: 0;
   transform: translateY(10px);
 }
 
+/* ── Stats row：不透明な白バー（フロスト・影による境界を排除） ── */
 .stats-row {
   display: flex;
   align-items: center;
@@ -1523,16 +1672,27 @@ onUnmounted(() => {
   position: sticky;
   top: 0;
   z-index: 5;
-  background: var(--bg);
-  margin: 0 -4px;
-  padding: 0 4px;
+  border-radius: var(--radius) !important;
+  margin: 0 0 8px;
+  padding: 10px 16px;
+}
+.stats-row.glass {
+  background: var(--white);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  /* カードと同じ縁幅で揃える（縁の有無による段差をなくす） */
+  border: 4px solid var(--sage);
+  box-shadow: none;
+}
+.stats-row.glass::after {
+  display: none;
 }
 .stats-row .density-btn {
   margin-left: auto;
 }
 
 .stat-selected {
-  color: var(--brand-blue);
+  color: var(--ocean);
 }
 
 .select-all-wrap {
@@ -1544,10 +1704,11 @@ onUnmounted(() => {
 .select-all-check {
   width: 15px;
   height: 15px;
-  accent-color: var(--brand-blue);
+  accent-color: var(--ocean);
   cursor: pointer;
 }
 
+/* ── Bulk buttons ── */
 .bulk-btn {
   display: inline-flex;
   align-items: center;
@@ -1557,27 +1718,43 @@ onUnmounted(() => {
   height: 26px;
   padding: 0 11px;
   border-radius: var(--radius-pill);
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--text-muted);
+  border: 1.5px solid var(--border);
+  background: rgba(255, 255, 255, 0.60);
+  color: var(--ocean);
   cursor: pointer;
-  transition: border-color 0.12s, color 0.12s, background 0.12s;
+  transition:
+    border-color var(--dur-fast) var(--ease-out-expo),
+    color var(--dur-fast) var(--ease-out-expo),
+    background var(--dur-fast) var(--ease-out-expo),
+    transform var(--dur-fast) var(--ease-spring),
+    box-shadow var(--dur-fast) var(--ease-out-expo);
   white-space: nowrap;
 }
 .bulk-btn:hover {
-  border-color: var(--text-muted);
-  color: var(--text);
+  border-color: var(--ocean);
+  background: var(--ocean);
+  color: var(--white);
+  transform: translateY(-1px) scale(1.03);
+  box-shadow: 0 3px 10px rgba(4, 157, 191, 0.22);
 }
-.bulk-btn--blue  { color: var(--brand-blue); border-color: var(--brand-blue); background: var(--accent-weak); }
-.bulk-btn--blue:hover  { background: var(--brand-blue); color: #fff; }
-.bulk-btn--success { color: var(--success); border-color: var(--success); background: var(--success-weak); }
-.bulk-btn--success:hover { background: var(--success); color: #fff; }
-.bulk-btn--warn  { color: var(--warning); border-color: var(--warning); background: var(--warning-weak); }
-.bulk-btn--warn:hover  { background: var(--warning); color: #fff; }
-.bulk-btn--purple { color: var(--brand-purple); border-color: var(--brand-purple); background: #F3EEFF; }
-.bulk-btn--purple:hover { background: var(--brand-purple); color: #fff; }
-.bulk-btn--clear { color: var(--text-muted); }
-.bulk-btn--clear:hover { color: var(--danger); border-color: var(--danger); }
+.bulk-btn:active { transform: scale(0.94); }
+/* ocean（デフォルト＝アーカイブ・未対応） */
+.bulk-btn--ocean { color: var(--ocean); border-color: var(--ocean); background: var(--ocean-12); }
+.bulk-btn--ocean:hover { background: var(--ocean); color: var(--white); }
+/* sand（対応中） */
+.bulk-btn--sand { color: var(--ocean); border-color: var(--sand); background: var(--sand-weak); }
+.bulk-btn--sand:hover { background: var(--sand); color: var(--ocean); border-color: var(--sand); }
+/* leaf（完了） */
+.bulk-btn--leaf { color: var(--ocean); border-color: var(--leaf); background: var(--leaf-weak); }
+.bulk-btn--leaf:hover { background: var(--leaf); color: var(--white); border-color: var(--leaf); }
+/* sage（保留・受信トレイに戻す） */
+.bulk-btn--sage { color: var(--ocean); border-color: var(--sage); background: var(--sage-weak); }
+.bulk-btn--sage:hover { background: var(--sage); color: var(--white); border-color: var(--sage); }
+/* clear（キャンセル） */
+.bulk-btn--clear { color: var(--text-muted); border-color: transparent; background: none; }
+.bulk-btn--clear:hover { color: var(--ocean); border-color: var(--ocean); background: var(--ocean-12); }
+
+/* ── Stat items ── */
 .stat {
   display: flex;
   align-items: baseline;
@@ -1586,7 +1763,7 @@ onUnmounted(() => {
 .stat-value {
   font-size: 18px;
   font-weight: 700;
-  color: var(--text);
+  color: var(--ocean);
   line-height: 1;
 }
 .stat-label {
@@ -1594,69 +1771,87 @@ onUnmounted(() => {
   color: var(--text-muted);
   font-weight: 500;
 }
-.stat-warn { color: var(--warning); }
-.stat-danger { color: var(--danger); }
 
+/* stat-btn：ベース */
 .stat-btn {
   background: none;
-  border: 1px solid transparent;
+  border: 1.5px solid transparent;
   border-radius: var(--radius-sm);
   padding: 3px 7px;
   cursor: pointer;
   margin: -3px -7px;
-  transition: border-color 0.12s, background 0.12s;
+  transition:
+    border-color var(--dur-fast) var(--ease-out-expo),
+    background var(--dur-fast) var(--ease-out-expo),
+    transform var(--dur-fast) var(--ease-spring),
+    box-shadow var(--dur-fast) var(--ease-out-expo);
 }
 .stat-btn:hover {
   border-color: var(--border);
-  background: var(--snow-surface);
+  background: rgba(255, 255, 255, 0.45);
+  transform: scale(1.04);
 }
+.stat-btn:active { transform: scale(0.94); }
+/* 選択時のポップ */
 .stat-btn--active {
-  border-color: var(--brand-blue) !important;
-  background: var(--accent-weak) !important;
+  animation: stat-pop var(--dur-fast) var(--ease-spring);
+}
+@keyframes stat-pop {
+  0%   { transform: scale(1); }
+  50%  { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+
+/* 未対応ヒーロー stat（件数があれば ocean 淡地で強調） */
+.stat-btn--hero-on {
+  border-color: var(--ocean) !important;
+  background: var(--ocean-12) !important;
+}
+.stat-btn--hero-on .stat-value {
+  color: var(--ocean);
+  font-weight: 800;
+}
+
+/* stat-btn：状態別（常に ocean 文字・枠と地で色を示す） */
+.stat-btn--active {
+  border-color: var(--ocean) !important;
+  background: var(--ocean-12) !important;
 }
 .stat-btn--active .stat-value,
 .stat-btn--active .stat-label {
-  color: var(--brand-blue);
+  color: var(--ocean);
 }
-.stat-btn--blue .stat-value    { color: var(--brand-blue); }
-.stat-btn--success .stat-value { color: var(--success); }
-.stat-btn--warn .stat-value    { color: var(--warning); }
-.stat-btn--danger .stat-value  { color: var(--danger); }
-
-.stat-btn--success.stat-btn--active {
-  border-color: var(--success) !important;
-  background: var(--success-weak) !important;
+/* sand（対応中） */
+.stat-btn--sand.stat-btn--active {
+  border-color: var(--sand) !important;
+  background: var(--sand-weak) !important;
 }
-.stat-btn--success.stat-btn--active .stat-value,
-.stat-btn--success.stat-btn--active .stat-label { color: var(--success); }
-
-.stat-btn--blue.stat-btn--active {
-  border-color: var(--brand-blue) !important;
-  background: var(--accent-weak) !important;
+/* leaf（完了） */
+.stat-btn--leaf.stat-btn--active {
+  border-color: var(--leaf) !important;
+  background: var(--leaf-weak) !important;
 }
-.stat-btn--blue.stat-btn--active .stat-value,
-.stat-btn--blue.stat-btn--active .stat-label { color: var(--brand-blue); }
-
-.stat-btn--success.stat-btn--active {
-  border-color: var(--success) !important;
-  background: var(--success-weak) !important;
+/* sage（保留） */
+.stat-btn--sage.stat-btn--active {
+  border-color: var(--sage) !important;
+  background: var(--sage-weak) !important;
 }
-.stat-btn--success.stat-btn--active .stat-value,
-.stat-btn--success.stat-btn--active .stat-label { color: var(--success); }
-
-.stat-btn--warn.stat-btn--active {
-  border-color: var(--warning) !important;
-  background: var(--warning-weak) !important;
+/* 期限切れ（ocean 塗り反転＝最強シグナル） */
+.stat-btn--overdue-active {
+  border-color: var(--ocean) !important;
 }
-.stat-btn--warn.stat-btn--active .stat-value,
-.stat-btn--warn.stat-btn--active .stat-label { color: var(--warning); }
-
-.stat-btn--danger.stat-btn--active {
-  border-color: var(--danger) !important;
-  background: var(--danger-weak) !important;
+.stat-btn--overdue-active .stat-value {
+  color: var(--ocean);
+  font-weight: 800;
 }
-.stat-btn--danger.stat-btn--active .stat-value,
-.stat-btn--danger.stat-btn--active .stat-label { color: var(--danger); }
+.stat-btn--overdue.stat-btn--active {
+  background: var(--ocean) !important;
+  border-color: var(--ocean) !important;
+}
+.stat-btn--overdue.stat-btn--active .stat-value,
+.stat-btn--overdue.stat-btn--active .stat-label {
+  color: var(--white);
+}
 
 .stat-sep {
   width: 1px;
@@ -1665,37 +1860,42 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
+/* ── Banner：ガラス化 ── */
 .banner {
   padding: 10px 14px;
-  border-radius: var(--radius);
+  border-radius: var(--radius) !important;
   margin-bottom: 12px;
   font-size: 13px;
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  box-shadow: var(--shadow-sm);
+  color: var(--ocean);
 }
 .banner--success {
-  background: var(--success-weak);
-  color: var(--success);
-  border: 1px solid var(--success);
+  border: 1.5px solid var(--leaf);
 }
 .banner--warn {
-  background: var(--warning-weak);
-  color: var(--warning);
-  border: 1px solid var(--warning);
+  border: 1.5px solid var(--sand);
 }
 .banner button {
   margin-left: auto;
   background: transparent;
-  border: 1px solid currentColor;
+  border: 1.5px solid var(--ocean);
   border-radius: var(--radius-sm);
   padding: 2px 8px;
   cursor: pointer;
   font-size: 12px;
+  color: var(--ocean);
+  font-weight: 600;
+  transition: background 0.12s, color 0.12s;
+}
+.banner button:hover {
+  background: var(--ocean);
+  color: var(--white);
 }
 
+/* ── Empty state：ガラスパネル ── */
 .empty-state {
   display: flex;
   flex-direction: column;
@@ -1704,12 +1904,22 @@ onUnmounted(() => {
   padding: 56px 0 48px;
   text-align: center;
 }
+.empty-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 40px 48px;
+  border-radius: var(--radius-lg) !important;
+  max-width: 360px;
+  width: 100%;
+}
 .empty-illustration {
   width: 120px;
   height: 120px;
   opacity: 0.9;
 }
-@keyframes dice-roll {
+@keyframes dice-spin-anim {
   0%   { transform: rotate(0deg); }
   20%  { transform: rotate(20deg); }
   40%  { transform: rotate(-15deg); }
@@ -1718,14 +1928,17 @@ onUnmounted(() => {
   100% { transform: rotate(0deg); }
 }
 .dice-spin {
-  animation: dice-roll 1.1s ease-in-out infinite;
+  animation: dice-spin-anim 1.1s ease-in-out infinite;
   transform-origin: center;
+}
+@media (prefers-reduced-motion: reduce) {
+  .dice-spin { animation: none !important; }
 }
 .empty-label {
   margin: 0;
   font-size: 15px;
   font-weight: 600;
-  color: var(--text-muted);
+  color: var(--ocean);
 }
 .empty-sub {
   margin: 0;
@@ -1738,51 +1951,87 @@ onUnmounted(() => {
   font-weight: 600;
   padding: 6px 16px;
   border-radius: var(--radius-pill);
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--text-muted);
+  border: 1.5px solid var(--border);
+  background: rgba(255, 255, 255, 0.60);
+  color: var(--ocean);
   cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
 }
 .empty-clear-btn:hover {
-  border-color: var(--brand-blue);
-  color: var(--brand-blue);
-  background: var(--accent-weak);
+  border-color: var(--ocean);
+  background: var(--ocean-12);
 }
 .btn-add-account {
   font-size: 13px;
   font-weight: 600;
   padding: 8px 20px;
-  border-radius: var(--radius);
+  border-radius: var(--radius-pill);
   border: none;
-  background: var(--brand-gradient);
-  color: #fff;
+  background: var(--ocean);
+  color: var(--white);
   cursor: pointer;
   box-shadow: var(--shadow-md);
+  transition: background var(--dur-base) var(--ease-standard), box-shadow var(--dur-base) var(--ease-standard), transform var(--dur-base) var(--ease-standard);
+}
+.btn-add-account:hover {
+  background: var(--ocean-72);
+  box-shadow: var(--shadow-lg);
 }
 
+/* ── メッセージリスト：FLIP + stagger ── */
 .list {
   display: flex;
   flex-direction: column;
   gap: var(--gap);
 }
 
+/* TransitionGroup FLIP（ゆっくり浮き出てくる＝ヌルヌル） */
+.list-move {
+  transition: transform 1800ms var(--ease-out-expo);
+}
+.list-enter-active {
+  transition: opacity 2000ms var(--ease-out-expo), transform 2000ms var(--ease-spring);
+}
+.list-leave-active {
+  transition: opacity 520ms var(--ease-out-expo), transform 520ms var(--ease-out-expo);
+  position: absolute;
+  width: 100%;
+}
+.list-enter-from {
+  opacity: 0;
+  transform: translateY(23px) scale(0.96);
+}
+.list-leave-to {
+  opacity: 0;
+  transform: translateX(-30px) scale(0.94);
+}
 
-/* ── Shortcuts modal ── */
+/* stagger：--i CSS 変数で出現を遅延（ゆったり順番に） */
+.list-enter-active {
+  transition-delay: calc(var(--i, 0) * 90ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .list-move,
+  .list-enter-active,
+  .list-leave-active {
+    transition: none !important;
+  }
+}
+
+/* ── Shortcuts modal：ガラス化 ── */
 .shortcuts-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.4);
+  background: rgba(4, 157, 191, 0.12);
   z-index: 1000;
   display: flex;
   align-items: center;
   justify-content: center;
-  backdrop-filter: blur(2px);
+  backdrop-filter: blur(4px);
 }
 .shortcuts-modal {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-lg);
+  border-radius: var(--radius) !important;
   width: 380px;
   max-width: calc(100vw - 32px);
   overflow: hidden;
@@ -1797,7 +2046,7 @@ onUnmounted(() => {
 .shortcuts-title {
   font-size: 14px;
   font-weight: 700;
-  color: var(--text);
+  color: var(--ocean);
 }
 .shortcuts-close {
   background: none;
@@ -1808,8 +2057,17 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   border-radius: var(--radius-sm);
+  transition:
+    color var(--dur-fast) var(--ease-out-expo),
+    background var(--dur-fast) var(--ease-out-expo),
+    transform var(--dur-fast) var(--ease-spring);
 }
-.shortcuts-close:hover { color: var(--text); background: var(--snow-surface); }
+.shortcuts-close:hover {
+  color: var(--ocean);
+  background: rgba(228, 235, 242, 0.60);
+  transform: scale(1.15);
+}
+.shortcuts-close:active { transform: scale(0.9); }
 
 .shortcuts-body {
   padding: 12px 16px 16px;
@@ -1853,8 +2111,8 @@ kbd {
   font-size: 11px;
   font-family: inherit;
   font-weight: 600;
-  color: var(--text);
-  background: var(--snow-surface);
+  color: var(--ocean);
+  background: rgba(228, 235, 242, 0.70);
   border: 1px solid var(--border);
   border-bottom-width: 2px;
   border-radius: 4px;
@@ -1867,7 +2125,7 @@ kbd {
 }
 .modal-enter-active .shortcuts-modal,
 .modal-leave-active .shortcuts-modal {
-  transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.18s ease;
+  transition: transform 0.18s var(--ease-spring), opacity 0.18s ease;
 }
 .modal-enter-from, .modal-leave-to { opacity: 0; }
 .modal-enter-from .shortcuts-modal { transform: scale(0.93); opacity: 0; }

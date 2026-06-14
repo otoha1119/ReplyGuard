@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import type { MessageRecord, MessageState } from "../types";
-import { ACTIONABLE_STATES } from "../types";
+import type { FeedbackCorrection, MessageRecord, MessageState, RequestType } from "../types";
+import { submitFeedback } from "../api";
 import ImportanceBadge from "./ImportanceBadge.vue";
 import StateBadge from "./StateBadge.vue";
 
@@ -35,15 +35,8 @@ const emit = defineEmits<{
   (e: "archive"): void;
   (e: "unarchive"): void;
   (e: "toggle-select"): void;
+  (e: "feedback-applied", patch: Partial<import("../types").AnalysisResult>): void;
 }>();
-
-const STATE_LABELS: Record<MessageState, string> = {
-  unhandled: "未対応",
-  in_progress: "対応中",
-  done: "完了",
-  snoozed: "保留",
-  dismissed: "アーカイブ",
-};
 
 const WEIGHT_LABELS: Record<string, string> = {
   light: "軽",
@@ -51,11 +44,20 @@ const WEIGHT_LABELS: Record<string, string> = {
   heavy: "重",
 };
 
-// どの分析器が判定したか（説明可能性）. 未知の値はそのまま表示する.
+const REQUEST_TYPE_LABELS: Record<string, string> = {
+  reply_required: "返信",
+  task_required: "作業",
+  review_required: "確認",
+  approval_required: "承認",
+  waiting_other: "他者対応待ち",
+  info_only: "情報共有",
+};
+
 const ANALYZER_LABELS: Record<string, string> = {
   gemini: "Gemini",
   anthropic: "Claude",
   openai: "GPT",
+  ollama: "Ollama",
   stub: "ルールベース",
 };
 
@@ -64,7 +66,6 @@ const analysis = computed(() => props.record.analysis);
 
 const avatarInitials = computed(() => {
   const sender = email.value.sender || "";
-  // Extract name part before the email address if present
   const name = sender.replace(/<[^>]+>/, "").trim() || sender;
   const words = name.split(/\s+/).filter(Boolean);
   if (words.length === 0) return "?";
@@ -72,17 +73,23 @@ const avatarInitials = computed(() => {
   return (words[0][0] + words[words.length - 1][0]).toUpperCase();
 });
 
+// 送信者文字列のハッシュで5色パレットの4色から決定的に選ぶ
+// mist(#E4EBF2) と white は地と被るため除外し、ocean/leaf/sand/sage の4色のみ使用
+const AVATAR_COLORS = ["var(--ocean)", "var(--leaf)", "var(--sand)", "var(--sage)"] as const;
 const avatarColor = computed(() => {
   const str = email.value.sender || "?";
   let hash = 0;
   for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
-  const hue = ((hash % 360) + 360) % 360;
-  return `hsl(${hue}, 55%, 45%)`;
+  const idx = ((hash % AVATAR_COLORS.length) + AVATAR_COLORS.length) % AVATAR_COLORS.length;
+  return AVATAR_COLORS[idx];
 });
 
 const importance = computed(() => analysis.value?.importance ?? 1);
 const summary = computed(() => analysis.value?.summary ?? email.value.snippet);
-const category = computed(() => analysis.value?.category ?? "");
+const requestTypeLabel = computed(() => {
+  const t = analysis.value?.request_type;
+  return t ? (REQUEST_TYPE_LABELS[t] ?? t) : "";
+});
 const weightLabel = computed(() => {
   const w = analysis.value?.task_weight;
   return w ? (WEIGHT_LABELS[w] ?? w) : "";
@@ -117,8 +124,6 @@ const receivedAtFull = computed(() => {
   return d.toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 });
 
-const triage = computed(() => props.record.triage_score.toFixed(1));
-
 const isArchive = computed(() => props.mode === "archive");
 
 const expanded = ref(false);
@@ -127,7 +132,6 @@ const bodyText = computed(() => email.value.body_text?.trim() || null);
 const bodyHtml = computed(() => {
   const raw = bodyText.value;
   if (!raw) return null;
-  // Escape HTML entities, then convert newlines and linkify URLs
   const escaped = raw
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -139,16 +143,130 @@ const bodyHtml = computed(() => {
   return linked.replace(/\n/g, "<br>");
 });
 
-// 現在の状態は遷移先ボタンから除く
-const nextStates = computed(() => ACTIONABLE_STATES);
+// 重要度5以上は件名を強調（5=緑 / 6＝最重要=青）
+const isTopImportance = computed(() => importance.value >= 5);
+const isMaxImportance = computed(() => importance.value >= 6);
+
+// プロバイダ（アプリ）ごとにカードの縁色を変える
+const providerClass = computed(() => `card--${(email.value.provider || "").toLowerCase()}`);
+
+// ── オーバーフローメニュー ──
+// 主要アクション: done（✓完了）・snoozed（⏸保留）
+// 残りは ⋯ メニューへ: in_progress・dismissed（archive）
+const overflowOpen = ref(false);
+
+function toggleOverflow(e: MouseEvent | KeyboardEvent) {
+  e.stopPropagation();
+  overflowOpen.value = !overflowOpen.value;
+}
+
+function closeOverflow() {
+  overflowOpen.value = false;
+}
+
+// ⋯メニューが開いている状態で外部クリックで閉じる（document listener）
+function handleOverflowBlur(e: FocusEvent) {
+  const related = e.relatedTarget as HTMLElement | null;
+  // フォーカスがオーバーフローメニュー内に留まる場合は閉じない
+  if (related && related.closest(".overflow-menu")) return;
+  overflowOpen.value = false;
+}
+
+// 状態遷移ハンドラ（emit は既存のまま）
+function onChangeState(s: MessageState) {
+  closeOverflow();
+  emit("change-state", s);
+}
+
+function onArchive() {
+  closeOverflow();
+  emit("archive");
+}
+
+// ── フィードバック（判定の修正） ──
+const feedbackOpen = ref(false);
+const feedbackBusy = ref(false);
+const feedbackDone = ref(false);
+const feedbackError = ref<string | null>(null);
+
+const fbForm = ref<FeedbackCorrection>({
+  importance: 1,
+  request_type: "info_only",
+  is_promotional: false,
+  is_security_notification: false,
+  reason: "",
+});
+
+function openFeedback() {
+  const a = analysis.value;
+  fbForm.value = {
+    importance: a?.importance ?? 3,
+    request_type: (a?.request_type ?? "info_only") as RequestType,
+    is_promotional: a?.is_promotional ?? false,
+    is_security_notification: a?.is_security_notification ?? false,
+    reason: "",
+  };
+  feedbackDone.value = false;
+  feedbackError.value = null;
+  feedbackOpen.value = true;
+}
+
+function toggleFeedback() {
+  if (feedbackOpen.value) {
+    feedbackOpen.value = false;
+  } else {
+    openFeedback();
+  }
+}
+
+async function sendFeedback() {
+  feedbackBusy.value = true;
+  feedbackError.value = null;
+  try {
+    await submitFeedback(props.record.message_id, fbForm.value);
+    feedbackDone.value = true;
+    emit("feedback-applied", {
+      importance: fbForm.value.importance,
+      request_type: fbForm.value.request_type,
+      is_promotional: fbForm.value.is_promotional,
+      is_security_notification: fbForm.value.is_security_notification,
+    });
+    setTimeout(() => { feedbackOpen.value = false; feedbackDone.value = false; }, 1500);
+  } catch (e) {
+    feedbackError.value = e instanceof Error ? e.message : "送信に失敗しました";
+  } finally {
+    feedbackBusy.value = false;
+  }
+}
+
+const REQUEST_TYPES: { value: RequestType; label: string }[] = [
+  { value: "reply_required",    label: "返信" },
+  { value: "task_required",     label: "作業" },
+  { value: "review_required",   label: "確認" },
+  { value: "approval_required", label: "承認" },
+  { value: "waiting_other",     label: "他者待ち" },
+  { value: "info_only",         label: "情報共有" },
+];
 </script>
 
 <template>
   <article
-    class="card"
-    :class="{ unread: email.is_unread, archive: isArchive, expanded, compact: props.compact, focused: props.focused, selected: props.selected }"
+    class="card glass"
+    :class="[providerClass, {
+      unread: email.is_unread,
+      archive: isArchive,
+      expanded,
+      compact: props.compact,
+      focused: props.focused,
+      selected: props.selected,
+    }]"
     :style="{ '--imp-color': `var(--imp-${importance})` }"
   >
+    <!--
+      左アクセントバー（::before）は CSS で定義．
+      .glass::after は鏡面ハイライト層なので z-index で content-area が上に来る
+    -->
+
     <div
       class="content-area"
       role="button"
@@ -157,7 +275,9 @@ const nextStates = computed(() => ACTIONABLE_STATES);
       @click="expanded = !expanded"
       @keydown.enter.space.prevent="expanded = !expanded"
     >
+      <!-- ── Row 1: アバター・差出人・時刻・状態ピル・未読ドット ── -->
       <div class="top">
+        <!-- アバター（サイコロ風 rounded-square） -->
         <div
           class="avatar-wrap"
           :title="email.sender || ''"
@@ -174,24 +294,37 @@ const nextStates = computed(() => ACTIONABLE_STATES);
             </svg>
           </div>
         </div>
-        <div class="head">
-          <div class="subject-row">
-            <span class="subject" v-html="highlight(email.subject || '(件名なし)')" />
-            <span v-if="email.is_unread" class="unread-dot" title="未読" aria-label="未読" />
-          </div>
-          <div class="meta">
-            <span class="sender" v-html="highlight(email.sender || '(差出人不明)')" />
-            <span class="dot">·</span>
-            <span class="provider">{{ email.provider }}</span>
-            <span v-if="receivedAt" class="dot">·</span>
-            <time v-if="receivedAt" :title="receivedAtFull">{{ receivedAt }}</time>
-          </div>
+
+        <!-- 差出人・ch・時刻 -->
+        <div class="meta-row">
+          <span class="sender" v-html="highlight(email.sender || '(差出人不明)')" />
+          <span class="dot" aria-hidden="true">·</span>
+          <span class="provider">{{ email.provider }}</span>
+          <span v-if="receivedAt" class="dot" aria-hidden="true">·</span>
+          <time v-if="receivedAt" class="received" :title="receivedAtFull" :datetime="email.received_at ?? undefined">{{ receivedAt }}</time>
         </div>
-        <StateBadge :state="record.state" />
+
+        <!-- 右端: 状態ピル + 未読ドット -->
+        <div class="top-right">
+          <StateBadge :state="record.state" />
+          <span v-if="email.is_unread" class="unread-dot" title="未読" aria-label="未読" />
+        </div>
+      </div>
+
+      <!-- ── Row 2: 件名 + 重要度サイコロ ── -->
+      <div class="subject-row">
+        <span
+          class="subject"
+          :class="{ 'subject--top': isTopImportance, 'subject--max': isMaxImportance }"
+          v-html="highlight(email.subject || '(件名なし)')"
+        />
         <ImportanceBadge :importance="importance" />
       </div>
 
+      <!-- ── Row 3: 要約 1〜2行クランプ ── -->
       <p v-if="!expanded && !props.compact" class="summary" v-html="highlight(summary)" />
+
+      <!-- ── 展開: 本文 ── -->
       <Transition name="expand">
         <div v-if="expanded" class="body-expanded">
           <div v-if="bodyHtml" class="body-text" v-html="bodyHtml" />
@@ -202,28 +335,29 @@ const nextStates = computed(() => ACTIONABLE_STATES);
         </div>
       </Transition>
 
-      <div class="tags">
-        <template v-if="!props.compact">
-          <span v-if="category" class="tag">{{ category }}</span>
-          <span v-if="weightLabel" class="tag weight">負荷 {{ weightLabel }}</span>
-          <span v-if="analysis?.needs_reply" class="tag reply">要返信</span>
-          <span
-            v-if="analyzerLabel"
-            class="tag analyzer"
-            :title="`判定した分析器: ${analyzerLabel}`"
-            >🤖 {{ analyzerLabel }}</span
-          >
-          <span class="tag triage triage-tip">
-            ▲ {{ triage }}
-            <span class="triage-tooltip">
-              <span class="triage-row">重要度 {{ importance }} / 5</span>
-              <span v-if="analysis?.needs_reply" class="triage-row">要返信</span>
-              <span v-if="analysis?.deadline" class="triage-row">期限：{{ analysis.deadline.slice(0, 10) }}</span>
-              <span v-if="weightLabel" class="triage-row">タスク負荷：{{ weightLabel }}</span>
-              <span v-if="analyzerLabel" class="triage-row">判定：{{ analyzerLabel }}</span>
-            </span>
-          </span>
-        </template>
+      <!-- ── Row 4: タグ群 + 展開アイコン ── -->
+      <div v-if="!props.compact" class="tags">
+        <span
+          v-if="email.is_spam"
+          class="tag tag--spam"
+          title="Gmail が迷惑メールに分類していました"
+          >⚠️ 迷惑メール</span
+        >
+        <span v-if="requestTypeLabel" class="tag">{{ requestTypeLabel }}</span>
+        <span v-if="weightLabel" class="tag">負荷 {{ weightLabel }}</span>
+        <span v-if="analysis?.request_type === 'reply_required'" class="tag tag--reply">要返信</span>
+        <span
+          v-if="analysis?.is_security_notification"
+          class="tag tag--security"
+          title="セキュリティ通知"
+          >🔒 セキュリティ</span
+        >
+        <span
+          v-if="analyzerLabel"
+          class="tag"
+          :title="`判定した分析器: ${analyzerLabel}`"
+          >🤖 {{ analyzerLabel }}</span
+        >
         <span class="expand-icon" aria-hidden="true">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <polyline :points="expanded ? '18 15 12 9 6 15' : '6 9 12 15 18 9'" />
@@ -232,46 +366,270 @@ const nextStates = computed(() => ACTIONABLE_STATES);
       </div>
     </div>
 
+    <!-- ── アクション行 ── -->
     <div class="actions" @click.stop>
-      <template v-if="!isArchive">
+      <!-- アーカイブ済み: 復元のみ -->
+      <template v-if="isArchive">
         <button
-          v-for="s in nextStates"
-          :key="s"
           type="button"
-          class="act"
-          :class="[`act-${s}`, { 'act-active': record.state === s }]"
+          class="act act--unarchive"
           :disabled="busy"
-          @click="s === 'dismissed' ? emit('archive') : emit('change-state', record.state === s ? 'unhandled' : s)"
+          title="受信トレイに戻す"
+          aria-label="受信トレイに戻す"
+          @click="emit('unarchive')"
         >
-          {{ STATE_LABELS[s] }}
+          復元
         </button>
       </template>
+
+      <!-- 受信トレイ: 主要2個 + ⋯ オーバーフロー -->
+      <template v-else>
+        <!-- ✓ 完了 -->
+        <button
+          type="button"
+          class="act act--done"
+          :class="{ 'act--active': record.state === 'done' }"
+          :disabled="busy"
+          title="完了にする"
+          aria-label="完了にする"
+          @click="onChangeState(record.state === 'done' ? 'unhandled' : 'done')"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+          完了
+        </button>
+
+        <!-- ⏸ 保留 -->
+        <button
+          type="button"
+          class="act act--snoozed"
+          :class="{ 'act--active': record.state === 'snoozed' }"
+          :disabled="busy"
+          title="保留にする"
+          aria-label="保留にする"
+          @click="onChangeState(record.state === 'snoozed' ? 'unhandled' : 'snoozed')"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>
+          </svg>
+          保留
+        </button>
+
+        <!-- ⋯ オーバーフローメニュー -->
+        <div class="overflow-wrap">
+          <button
+            type="button"
+            class="act act--overflow"
+            :disabled="busy"
+            :aria-expanded="overflowOpen"
+            aria-haspopup="true"
+            title="その他の操作"
+            aria-label="その他の操作"
+            @click="toggleOverflow"
+            @keydown.esc="closeOverflow"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true">
+              <circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>
+            </svg>
+          </button>
+
+          <Transition name="menu">
+            <div
+              v-if="overflowOpen"
+              class="overflow-menu glass"
+              role="menu"
+              @focusout="handleOverflowBlur"
+            >
+              <!-- 対応中に戻す -->
+              <button
+                type="button"
+                class="menu-item"
+                :class="{ 'menu-item--active': record.state === 'in_progress' }"
+                role="menuitem"
+                :disabled="busy"
+                @click="onChangeState(record.state === 'in_progress' ? 'unhandled' : 'in_progress')"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                </svg>
+                {{ record.state === 'in_progress' ? '未対応に戻す' : '対応中にする' }}
+              </button>
+
+              <!-- 対象外（archive） -->
+              <button
+                type="button"
+                class="menu-item menu-item--dismiss"
+                role="menuitem"
+                :disabled="busy"
+                @click="onArchive"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/>
+                </svg>
+                対象外にする
+              </button>
+            </div>
+          </Transition>
+        </div>
+      </template>
+
+      <!-- 判定の修正（フィードバック） -->
       <button
-        v-else
+        v-if="analysis"
         type="button"
-        class="act act-unarchive"
+        class="act act--feedback"
+        :class="{ 'act--active': feedbackOpen }"
         :disabled="busy"
-        @click="emit('unarchive')"
+        title="判定を修正する"
+        aria-label="判定を修正する"
+        @click="toggleFeedback"
       >
-        復元
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>
+        </svg>
+        修正
       </button>
     </div>
+
+    <!-- ── フィードバックパネル ── -->
+    <Transition name="expand">
+      <div v-if="feedbackOpen" class="feedback-panel" @click.stop>
+        <p class="fb-title">判定を修正</p>
+
+        <div class="fb-row">
+          <span class="fb-label">重要度</span>
+          <div class="fb-btns">
+            <button
+              v-for="n in [1, 2, 3, 4, 5, 6]"
+              :key="n"
+              type="button"
+              class="fb-btn"
+              :class="{ selected: fbForm.importance === n, [`imp-${n}`]: true }"
+              @click="fbForm.importance = n"
+            >{{ n }}</button>
+          </div>
+        </div>
+
+        <div class="fb-row">
+          <span class="fb-label">対応区分</span>
+          <div class="fb-btns wrap">
+            <button
+              v-for="rt in REQUEST_TYPES"
+              :key="rt.value"
+              type="button"
+              class="fb-btn"
+              :class="{ selected: fbForm.request_type === rt.value }"
+              @click="fbForm.request_type = rt.value"
+            >{{ rt.label }}</button>
+          </div>
+        </div>
+
+        <div class="fb-row">
+          <span class="fb-label">属性</span>
+          <div class="fb-btns wrap">
+            <button
+              type="button"
+              class="fb-btn"
+              :class="{ selected: fbForm.is_promotional }"
+              @click="fbForm.is_promotional = !fbForm.is_promotional"
+            >プロモーション</button>
+            <button
+              type="button"
+              class="fb-btn"
+              :class="{ selected: fbForm.is_security_notification }"
+              @click="fbForm.is_security_notification = !fbForm.is_security_notification"
+            >セキュリティ通知</button>
+          </div>
+        </div>
+
+        <div class="fb-row">
+          <span class="fb-label">メモ</span>
+          <input
+            v-model="fbForm.reason"
+            type="text"
+            class="fb-input"
+            maxlength="300"
+            placeholder="修正理由（任意・学習に利用）"
+          />
+        </div>
+
+        <div v-if="feedbackDone" class="fb-notice success">送信しました</div>
+        <div v-else-if="feedbackError" class="fb-notice error">{{ feedbackError }}</div>
+
+        <div class="fb-footer">
+          <button
+            type="button"
+            class="fb-submit"
+            :disabled="feedbackBusy || feedbackDone"
+            @click="sendFeedback"
+          >変更を送信</button>
+          <button
+            type="button"
+            class="fb-cancel"
+            @click="feedbackOpen = false"
+          >キャンセル</button>
+        </div>
+      </div>
+    </Transition>
   </article>
 </template>
 
 <style scoped>
+/*
+ * MessageCard — ダッシュボード型 × Apple Liquid Glass
+ * パレット: 5色（mist/ocean/sage/leaf/sand）＋白のみ
+ * 文字は常に ocean（var(--text)/var(--ocean)）．濃色塗り面上のみ白
+ * ダークモードなし（html.dark セレクタ禁止）
+ * DESIGN.md §0〜§7・§A-5 準拠
+ */
+
+/* ── カード本体 ── */
 .card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
   padding: 14px 16px 14px 20px;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  box-shadow: var(--shadow-sm);
-  transition: box-shadow 0.15s;
+  transition:
+    box-shadow var(--dur-base) var(--ease-out-expo),
+    transform var(--dur-base) var(--ease-spring);
   position: relative;
+  will-change: transform;
 }
+
+/* カードは「不透明な白」にして，半透明ガラスの中間レイヤー（背景が透けて
+   オレンジに色付く層）を排除する．背景と白いカードだけが見える状態にする．
+   （.card.glass で global .glass より高い詳細度で上書き） */
+.card.glass {
+  background: var(--white);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  /* アプリ（プロバイダ）ごとに縁色を変える．既定は sage */
+  border: 4px solid var(--sage);
+  /* 静止時は影なし＝境界はカード縁の1本だけ（影が作る2本目の境目を排除） */
+  box-shadow: none;
+  border-radius: var(--radius);
+}
+/* フロストの鏡面反射層も不要（白カードなので） */
+.card.glass::after {
+  display: none;
+}
+
+/* プロバイダ別の縁色（アプリの違いを一目で） */
+.card--gmail.glass   { border-color: var(--ocean); } /* Google → 青 */
+.card--github.glass  { border-color: var(--leaf); }  /* GitHub → 緑 */
+.card--slack.glass   { border-color: var(--sand); }  /* Slack → 黄 */
+.card--outlook.glass { border-color: var(--sage); }  /* Outlook → 鼠 */
+
+/* hover：派手に弾んで持ち上がる（枠/影は出さず・白いまま） */
+.card:hover {
+  box-shadow: none;
+  transform: translateY(-7px) scale(1.015);
+}
+.card:active {
+  transform: translateY(-2px) scale(0.995);
+}
+
 .card.compact {
   padding: 8px 16px 8px 20px;
   gap: 0;
@@ -282,59 +640,49 @@ const nextStates = computed(() => ACTIONABLE_STATES);
 .card.compact.expanded .content-area {
   gap: 8px;
 }
-.card::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 4px;
-  border-radius: var(--radius) 0 0 var(--radius);
-  background: var(--imp-color, var(--border));
-  opacity: 0.5;
-  transition: opacity 0.15s;
-}
-.card:hover::before {
-  opacity: 1;
-}
-.card.unread::before {
-  opacity: 1;
-}
+
+/* アーカイブ状態: ガラスを薄く・控えめ */
 .card.archive {
-  background: var(--snow-white);
-  opacity: 0.88;
-  box-shadow: none;
-}
-.card.archive::before {
-  opacity: 0.25;
-}
-.card.focused {
-  outline: 2px solid var(--brand-blue);
-  outline-offset: 1px;
-}
-.card.focused::before {
-  opacity: 1;
+  opacity: 0.82;
 }
 
+/* フォーカス: WCAG 2.1 AA（ocean 55%） */
+.card.focused {
+  outline: 3px solid rgba(4, 157, 191, 0.55);
+  outline-offset: 2px;
+}
+
+/* 選択状態 */
+/* 選択時：青いリング/色付けはしない（選択はアバターのチェックで示す） */
+.card.selected {
+  box-shadow: none;
+}
+
+/* ── コンテンツエリア ── */
 .content-area {
   display: flex;
   flex-direction: column;
   gap: 8px;
   cursor: pointer;
   outline: none;
-  border-radius: calc(var(--radius) - 2px);
+  border-radius: calc(var(--radius) - 4px);
+  /* .glass::after (z-index:0) より上に来るよう z-index 設定 */
+  position: relative;
+  z-index: 2;
 }
 .content-area:focus-visible {
-  outline: 2px solid var(--brand-blue);
+  outline: 3px solid rgba(4, 157, 191, 0.55);
   outline-offset: 2px;
 }
 
+/* ── Row 1: アバター・差出人・時刻・状態ピル ── */
 .top {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
+/* ── アバター（サイコロ風 rounded square） ── */
 .avatar-wrap {
   position: relative;
   width: 32px;
@@ -345,32 +693,35 @@ const nextStates = computed(() => ACTIONABLE_STATES);
 .avatar {
   width: 32px;
   height: 32px;
-  border-radius: 50%;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 12px;
   font-weight: 700;
-  color: #fff;
+  color: var(--white);
   letter-spacing: 0.02em;
-  transition: opacity 0.15s;
+  transition: opacity var(--dur-fast) var(--ease-spring);
 }
 .avatar-check {
   position: absolute;
   inset: 0;
-  border-radius: 50%;
-  background: var(--snow-surface);
-  border: 2px solid var(--border);
+  border-radius: 8px;
+  background: var(--mist);
+  border: 2px solid var(--sage);
   display: flex;
   align-items: center;
   justify-content: center;
   opacity: 0;
-  transition: opacity 0.15s;
-  color: #fff;
+  transition:
+    opacity var(--dur-fast) var(--ease-spring),
+    background var(--dur-fast) var(--ease-out-expo),
+    border-color var(--dur-fast) var(--ease-out-expo);
+  color: var(--white);
 }
 .avatar-check.checked {
-  background: var(--brand-blue);
-  border-color: var(--brand-blue);
+  background: var(--ocean);
+  border-color: var(--ocean);
   opacity: 1;
 }
 .avatar-wrap:hover .avatar-check:not(.checked) {
@@ -379,28 +730,60 @@ const nextStates = computed(() => ACTIONABLE_STATES);
 .card.selected .avatar-check {
   opacity: 1;
 }
-.avatar-wrap:hover .avatar {
-  opacity: 0;
-}
+.avatar-wrap:hover .avatar,
 .card.selected .avatar {
   opacity: 0;
 }
-.card.selected {
-  background: var(--accent-weak);
-  border-color: var(--brand-blue);
-}
-.card.selected::before {
-  opacity: 1;
-  background: var(--brand-blue);
-}
-.head {
+
+/* 差出人・ch・時刻（flex 1 で件名の幅を確保） */
+.meta-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   flex: 1;
   min-width: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  overflow: hidden;
 }
-.subject-row {
+.sender {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
+.provider {
+  white-space: nowrap;
+}
+.received {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.dot {
+  opacity: 0.4;
+  flex-shrink: 0;
+}
+
+/* 右端: 状態ピル + 未読ドット */
+.top-right {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-shrink: 0;
+}
+.unread-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ocean);
+  flex: none;
+}
+
+/* ── Row 2: 件名 + 重要度サイコロ ── */
+.subject-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
 }
 .subject {
   font-weight: 600;
@@ -409,43 +792,41 @@ const nextStates = computed(() => ACTIONABLE_STATES);
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text);
+  /* 文字幅に合わせる（マーカーが文字を超えて端まで伸びないように） */
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+/* 重要度サイコロは常に右端へ */
+.subject-row :deep(.imp) {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+/* コンパクト表示時はサイコロを小さく（キツキツ回避・狭い画面対策） */
+.card.compact :deep(.imp svg) {
+  width: 30px;
+  height: 30px;
 }
 .unread .subject {
   font-weight: 700;
 }
-.unread-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--brand-blue);
-  flex: none;
+
+/* 重要度5以上: 文字は青のまま・太字＋ sand 蛍光マーカー（5も6も黄色） */
+.subject--top {
+  font-weight: 700;
+  background: linear-gradient(transparent 62%, var(--sand) 62%);
+  border-radius: 1px;
+  padding: 0 2px 2px;
 }
 
-.meta {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--text-muted);
-  font-size: 12px;
-  margin-top: 2px;
-}
-.sender {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 280px;
-}
-.dot {
-  opacity: 0.4;
-}
-
+/* ── Row 3: 要約 ── */
 .summary {
   margin: 0;
   color: var(--text-muted);
   font-size: 13px;
   display: -webkit-box;
-  -webkit-line-clamp: 1;
-  line-clamp: 1;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
   line-height: 1.55;
@@ -457,6 +838,7 @@ const nextStates = computed(() => ACTIONABLE_STATES);
   overflow: visible;
 }
 
+/* ── 展開本文 ── */
 .body-expanded {
   display: flex;
   flex-direction: column;
@@ -472,12 +854,13 @@ const nextStates = computed(() => ACTIONABLE_STATES);
   max-height: 400px;
   overflow-y: auto;
   padding: 10px 12px;
-  background: var(--snow-surface);
-  border: 1px solid var(--border);
+  background: rgba(228, 235, 242, 0.55);
+  border: 1px solid var(--sage);
   border-radius: var(--radius-sm);
 }
 .body-text :deep(a) {
-  color: var(--brand-blue);
+  color: var(--ocean);
+  text-decoration: underline;
   word-break: break-all;
 }
 .suggested-action {
@@ -486,157 +869,402 @@ const nextStates = computed(() => ACTIONABLE_STATES);
   color: var(--text-muted);
 }
 .suggested-label {
-  color: var(--brand-blue);
+  color: var(--ocean);
   font-weight: 600;
 }
 
+/* ── Row 4: タグ群 ── */
 .tags {
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
+  align-items: center;
 }
+
+/* 基本タグ: mist/白淡地＋sage枠＋ocean文字 pill */
 .tag {
   font-size: 11px;
   color: var(--text-muted);
-  background: var(--snow-surface);
-  border: 1px solid var(--border);
+  background: rgba(228, 235, 242, 0.55);
+  border: 1px solid var(--sage);
   border-radius: var(--radius-pill);
   padding: 2px 9px;
+  transition: transform var(--dur-fast) var(--ease-spring);
 }
-.tag.reply {
-  color: var(--brand-blue);
-  border-color: var(--brand-blue);
-  background: var(--accent-weak);
+.tag:hover {
+  transform: translateY(-1px) scale(1.03);
+}
+
+/* 要返信: ocean 強調（ocean-12地＋ocean枠＋ocean文字＋weight600） */
+.tag--reply {
+  color: var(--ocean);
+  border-color: var(--ocean);
+  background: var(--ocean-12);
   font-weight: 600;
 }
-.tag.triage {
-  color: var(--text-muted);
+
+/* 迷惑メール: sand 強調で注意喚起 */
+.tag--spam {
+  color: var(--ocean);
+  border-color: var(--sand);
+  background: var(--sand-weak);
+  font-weight: 600;
 }
-.triage-tip {
-  position: relative;
-  cursor: default;
+
+/* セキュリティ通知: leaf 強調 */
+.tag--security {
+  color: var(--ocean);
+  border-color: var(--leaf);
+  background: var(--leaf-weak);
+  font-weight: 600;
 }
-.triage-tooltip {
-  display: none;
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--text);
-  color: var(--surface);
-  border-radius: var(--radius-sm);
-  padding: 7px 10px;
-  font-size: 11px;
-  white-space: nowrap;
-  z-index: 100;
-  flex-direction: column;
-  gap: 3px;
-  box-shadow: var(--shadow-lg);
-  pointer-events: none;
-}
-.triage-tooltip::after {
-  content: '';
-  position: absolute;
-  top: 100%;
-  left: 50%;
-  transform: translateX(-50%);
-  border: 5px solid transparent;
-  border-top-color: var(--text);
-}
-.triage-tip:hover .triage-tooltip {
-  display: flex;
-}
-.triage-row {
-  display: block;
-  line-height: 1.5;
-}
-.tag.analyzer {
-  color: var(--text-muted);
-  font-variant: tabular-nums;
-}
+
 .expand-icon {
   margin-left: auto;
   font-size: 10px;
   color: var(--text-muted);
   opacity: 0.45;
   user-select: none;
+  transition: transform var(--dur-base) var(--ease-spring);
+}
+/* expanded 状態のアイコン: 上向き矢印は SVG points で制御済み．
+   scale でほんのり pop して切り替えを知覚しやすくする */
+.card.expanded .expand-icon {
+  transform: scale(1.05);
 }
 
+/* ── アクション行 ── */
 .actions {
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid rgba(174, 191, 188, 0.35);
   padding-top: 10px;
+  position: relative;
+  z-index: 2;
 }
 .card.compact .actions {
   padding-top: 6px;
 }
+
+/* 基本ボタン共通 */
 .act {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 12px;
   font-weight: 500;
-  padding: 4px 14px;
+  padding: 4px 12px;
   border-radius: var(--radius-pill);
-  border: 1px solid var(--border);
-  background: var(--surface);
+  border: 1px solid rgba(174, 191, 188, 0.55);
+  background: rgba(255, 255, 255, 0.55);
   color: var(--text-muted);
-  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  transition:
+    border-color var(--dur-fast) var(--ease-out-expo),
+    background var(--dur-fast) var(--ease-out-expo),
+    color var(--dur-fast) var(--ease-out-expo),
+    transform var(--dur-fast) var(--ease-spring);
+  white-space: nowrap;
 }
 .act:hover:not(:disabled) {
-  border-color: var(--brand-blue);
-  color: var(--brand-blue);
-  background: var(--accent-weak);
+  border-color: var(--ocean);
+  color: var(--ocean);
+  background: var(--ocean-12);
+  transform: translateY(-1px) scale(1.03);
 }
-.act.act-active {
-  font-weight: 600;
-  border-color: currentColor;
-  opacity: 1;
+.act:active:not(:disabled) {
+  transform: scale(0.94);
 }
-.act-unhandled.act-active  { color: var(--text-muted); border-color: var(--text-muted); background: var(--snow-surface); }
-.act-in_progress.act-active { color: var(--brand-blue); border-color: var(--brand-blue); background: var(--accent-weak); }
-.act-done.act-active        { color: var(--success);    border-color: var(--success);    background: var(--success-weak); }
-.act-snoozed.act-active     { color: var(--warning);    border-color: var(--warning);    background: var(--warning-weak); }
-.act-dismissed.act-active   { color: var(--brand-purple); border-color: var(--brand-purple); background: #F3EEFF; }
 .act:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
-.act-done:hover:not(:disabled) {
-  border-color: var(--success);
-  color: var(--success);
-  background: var(--success-weak);
+
+/* ✓ 完了 */
+.act--done:hover:not(:disabled),
+.act--done.act--active {
+  border-color: var(--leaf);
+  color: var(--ocean);
+  background: var(--leaf-weak);
 }
-.act-dismissed:hover:not(:disabled) {
-  border-color: var(--brand-purple);
-  color: var(--brand-purple);
-  background: #F3EEFF;
-}
-.act-unarchive:hover:not(:disabled) {
-  border-color: var(--brand-purple);
-  color: var(--brand-purple);
-  background: #F3EEFF;
+.act--done.act--active {
+  font-weight: 600;
 }
 
+/* ⏸ 保留 */
+.act--snoozed:hover:not(:disabled),
+.act--snoozed.act--active {
+  border-color: var(--sage);
+  color: var(--ocean);
+  background: var(--sage-weak);
+}
+.act--snoozed.act--active {
+  font-weight: 600;
+}
+
+/* 復元ボタン（アーカイブ時） */
+.act--unarchive:hover:not(:disabled) {
+  border-color: var(--ocean);
+  color: var(--ocean);
+  background: var(--ocean-12);
+}
+
+/* ✎ 修正（フィードバック）: 右端に寄せる */
+.act--feedback {
+  margin-left: auto;
+}
+.act--feedback:hover:not(:disabled),
+.act--feedback.act--active {
+  border-color: var(--ocean);
+  color: var(--ocean);
+  background: var(--ocean-12);
+}
+.act--feedback.act--active {
+  font-weight: 600;
+}
+
+/* ⋯ オーバーフロートリガー（アイコンボタン: scale のみ） */
+.act--overflow {
+  padding: 4px 8px;
+}
+.act--overflow:hover:not(:disabled) {
+  transform: scale(1.15);
+}
+.act--overflow:active:not(:disabled) {
+  transform: scale(0.9);
+}
+
+/* ── オーバーフローメニュー ── */
+.overflow-wrap {
+  position: relative;
+  margin-left: auto;
+}
+
+/* ガラスメニュー本体（.glass は backdrop-filter を担う） */
+.overflow-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  min-width: 152px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 300;
+  /* .glass が border-radius を設定するが上書きして小さめに */
+  border-radius: var(--radius-sm) !important;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 7px 10px;
+  border-radius: 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  text-align: left;
+  transition:
+    background var(--dur-fast) var(--ease-out-expo),
+    color var(--dur-fast) var(--ease-out-expo),
+    transform var(--dur-fast) var(--ease-spring);
+  white-space: nowrap;
+}
+.menu-item:hover:not(:disabled) {
+  background: var(--ocean-12);
+  color: var(--ocean);
+  transform: translateY(-1px) scale(1.03);
+}
+.menu-item:active:not(:disabled) {
+  transform: scale(0.94);
+}
+.menu-item--active {
+  color: var(--ocean);
+  background: var(--ocean-08);
+  font-weight: 600;
+}
+.menu-item--dismiss:hover:not(:disabled) {
+  background: var(--sage-weak);
+  color: var(--ocean);
+}
+.menu-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ── メニュー出現アニメーション（fade + translateY/scale, out-expo） ── */
+.menu-enter-active {
+  transition:
+    opacity var(--dur-fast) var(--ease-out-expo),
+    transform var(--dur-fast) var(--ease-spring);
+}
+.menu-leave-active {
+  transition:
+    opacity var(--dur-fast) var(--ease-out-expo),
+    transform var(--dur-fast) var(--ease-out-expo);
+}
+.menu-enter-from,
+.menu-leave-to {
+  opacity: 0;
+  transform: translateY(6px) scale(0.94);
+}
+
+/* ── 検索ハイライト: sand地＋ocean文字（黄色禁止） ── */
 :deep(.hl) {
-  background: #FFF176;
-  color: #1a1a1a;
+  background: var(--sand);
+  color: var(--ocean);
   border-radius: 2px;
   padding: 0 1px;
 }
-html.dark :deep(.hl) {
-  background: #7B6B00;
-  color: #fff;
-}
 
-/* Expand animation */
-.expand-enter-active,
+/* ── 展開アニメーション（opacity + transform, out-expo で統一） ── */
+.expand-enter-active {
+  transition:
+    opacity var(--dur-base) var(--ease-out-expo),
+    transform var(--dur-base) var(--ease-spring);
+}
 .expand-leave-active {
-  transition: opacity 0.2s ease, transform 0.2s ease;
-  transform-origin: top;
+  transition:
+    opacity var(--dur-fast) var(--ease-out-expo),
+    transform var(--dur-fast) var(--ease-out-expo);
 }
 .expand-enter-from,
 .expand-leave-to {
   opacity: 0;
-  transform: scaleY(0.95);
+  transform: translateY(-6px) scaleY(0.94);
+  transform-origin: top;
+}
+
+/* ── フィードバックパネル（判定の修正） ── */
+.feedback-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-top: 1px solid rgba(174, 191, 188, 0.35);
+  padding-top: 12px;
+  margin-top: 2px;
+}
+.fb-title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.fb-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.fb-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  width: 64px;
+  flex-shrink: 0;
+  padding-top: 5px;
+}
+.fb-btns {
+  display: flex;
+  gap: 5px;
+}
+.fb-btns.wrap {
+  flex-wrap: wrap;
+}
+.fb-btn {
+  font-size: 12px;
+  padding: 4px 11px;
+  border-radius: var(--radius-pill);
+  border: 1px solid rgba(174, 191, 188, 0.55);
+  background: rgba(255, 255, 255, 0.55);
+  color: var(--text-muted);
+  transition:
+    border-color var(--dur-fast) var(--ease-out-expo),
+    background var(--dur-fast) var(--ease-out-expo),
+    color var(--dur-fast) var(--ease-out-expo),
+    transform var(--dur-fast) var(--ease-spring);
+}
+.fb-btn:hover {
+  border-color: var(--ocean);
+  color: var(--ocean);
+  transform: translateY(-1px) scale(1.03);
+}
+.fb-btn.selected {
+  border-color: var(--ocean);
+  background: var(--ocean-12);
+  color: var(--ocean);
+  font-weight: 600;
+}
+/* 重要度ボタン選択時は段階色で塗り分け（imp パレット準拠） */
+.fb-btn.imp-4.selected { border-color: var(--imp-4); background: var(--sand-weak); }
+.fb-btn.imp-5.selected { border-color: var(--imp-5); background: var(--leaf-weak); }
+.fb-btn.imp-6.selected { border-color: var(--imp-6); background: var(--sand-strong); }
+
+.fb-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(174, 191, 188, 0.55);
+  background: rgba(255, 255, 255, 0.6);
+  color: var(--text);
+}
+.fb-input:focus {
+  outline: none;
+  border-color: var(--ocean);
+}
+.fb-notice {
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+}
+.fb-notice.success {
+  background: var(--leaf-weak);
+  color: var(--ocean);
+  font-weight: 600;
+}
+.fb-notice.error {
+  background: var(--ocean-12);
+  color: var(--ocean);
+}
+.fb-footer {
+  display: flex;
+  gap: 6px;
+}
+.fb-submit {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 16px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--ocean);
+  background: var(--ocean);
+  color: var(--white);
+  transition:
+    transform var(--dur-fast) var(--ease-spring),
+    opacity var(--dur-fast) var(--ease-out-expo);
+}
+.fb-submit:hover:not(:disabled) {
+  transform: translateY(-1px) scale(1.03);
+}
+.fb-submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.fb-cancel {
+  font-size: 12px;
+  padding: 6px 16px;
+  border-radius: var(--radius-pill);
+  border: 1px solid rgba(174, 191, 188, 0.55);
+  background: rgba(255, 255, 255, 0.55);
+  color: var(--text-muted);
+  transition: border-color var(--dur-fast) var(--ease-out-expo);
+}
+.fb-cancel:hover {
+  border-color: var(--ocean);
+  color: var(--ocean);
 }
 </style>

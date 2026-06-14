@@ -13,11 +13,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.api.auth import authenticate, create_access_token
 from app.api.deps import (
     AuthDep,
+    get_feedback_service,
     get_ingestion,
     get_repo,
     get_settings,
     get_state_service,
 )
+from app.services.feedback_service import FeedbackService
 from app.api.schemas import (
     IngestResult,
     LoginRequest,
@@ -25,7 +27,7 @@ from app.api.schemas import (
     TokenResponse,
 )
 from app.config import Settings
-from app.models import MessageRecord, MessageState
+from app.models import FeedbackCorrection, MessageRecord, MessageState
 from app.ports import MessageQuery, Repository
 from app.services.ingestion import IngestionService
 from app.services.state_service import StateService
@@ -51,9 +53,12 @@ def list_messages(
     descending: bool = Query(default=True),
     providers: list[str] = Query(default=[]),
     account_addresses: list[str] = Query(default=[]),
-    importance_min: int | None = Query(default=None, ge=1, le=5),
+    importance_min: int | None = Query(default=None, ge=1, le=6),
     received_after: datetime | None = Query(default=None),
     received_before: datetime | None = Query(default=None),
+    email_categories: list[str] = Query(default=[]),
+    is_promotional: bool | None = Query(default=None),
+    is_security_notification: bool | None = Query(default=None),
     repo: Repository = Depends(get_repo),
 ) -> list[MessageRecord]:
     q = MessageQuery(
@@ -69,6 +74,9 @@ def list_messages(
         importance_min=importance_min,
         received_after=received_after,
         received_before=received_before,
+        email_categories=email_categories,
+        is_promotional=is_promotional,
+        is_security_notification=is_security_notification,
     )
     return repo.query(q)
 
@@ -153,6 +161,30 @@ def trigger_ingest(
     ingestion: IngestionService = Depends(get_ingestion),
 ) -> dict:
     return ingestion.run_once()
+
+
+@router.post(
+    "/messages/{message_id}/feedback",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["messages"],
+    dependencies=[AuthDep],
+)
+def submit_feedback(
+    message_id: str,
+    body: FeedbackCorrection,
+    svc: FeedbackService | None = Depends(get_feedback_service),
+    repo: Repository = Depends(get_repo),
+) -> None:
+    """ユーザーによる分析結果の修正をベクトル DB に保存する.
+
+    OLLAMA_BASE_URL 未設定の場合は 503 を返す.
+    """
+    if svc is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="フィードバック機能は無効です（OLLAMA_BASE_URL を設定してください）",
+        )
+    svc.submit(message_id, body)
 
 
 @router.post("/auth/login", response_model=TokenResponse, tags=["auth"])

@@ -12,6 +12,7 @@ from app.api.auth import decode_token
 from app.config import Settings
 from app.ports import Repository
 from app.repositories.account_repository import AccountRepository
+from app.services.feedback_service import FeedbackService
 from app.services.ingestion import IngestionService
 from app.services.oauth_gmail import OAuthGmailService
 from app.services.oauth_github import OAuthGithubService
@@ -36,6 +37,11 @@ def get_state_service(request: Request) -> StateService:
 
 def get_account_repo(request: Request) -> AccountRepository:
     return request.app.state.account_repo
+
+
+def get_feedback_service(request: Request) -> FeedbackService | None:
+    """フィードバックサービスを返す. OLLAMA_BASE_URL 未設定なら None."""
+    return getattr(request.app.state, "feedback_service", None)
 
 
 def get_oauth_service(request: Request) -> OAuthGmailService:

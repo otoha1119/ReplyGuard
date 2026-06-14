@@ -71,9 +71,9 @@ class CountingAnalyzer:
         urgent = "至急" in email.subject or "本日中" in email.subject
         return AnalysisResult(
             importance=5 if urgent else 2,
-            needs_reply=urgent,
             task_weight="heavy" if urgent else "light",
-            category="action_required" if urgent else "promo",
+            request_type="reply_required" if urgent else "info_only",
+            is_promotional=not urgent,
             summary=email.subject,
             deadline=email.received_at if urgent else None,
             reason="スモーク用",

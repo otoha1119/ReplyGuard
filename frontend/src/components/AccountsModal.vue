@@ -126,22 +126,23 @@ function onOverlayClick(e: MouseEvent): void {
 
 // Provider catalogue — fixed list, enriched with connected account if any
 const PROVIDERS = [
-  { id: "gmail",   label: "Gmail",   color: "#EA4335", soon: false },
-  { id: "github",  label: "GitHub",  color: "#24292e", soon: false },
-  { id: "slack",   label: "Slack",   color: "#4A154B", soon: false },
-  { id: "outlook", label: "Outlook", color: "#0078D4", soon: true  },
-] as const;
+  { id: "gmail",   label: "Gmail",   color: "#049DBF", soon: false, maxAccounts: Infinity },
+  { id: "github",  label: "GitHub",  color: "#049DBF", soon: false, maxAccounts: 1 },
+  { id: "slack",   label: "Slack",   color: "#049DBF", soon: false, maxAccounts: Infinity },
+  { id: "outlook", label: "Outlook", color: "#AEBFBC", soon: true,  maxAccounts: 1 },
+] satisfies { id: string; label: string; color: string; soon: boolean; maxAccounts: number }[];
 
-function connectedAccount(provider: string): AccountConfig | undefined {
-  return accounts.value.find((a) => a.provider.toLowerCase() === provider);
+function connectedAccounts(provider: string): AccountConfig[] {
+  return accounts.value.filter((a) => a.provider.toLowerCase() === provider);
 }
 
 onMounted(() => { void loadAccounts(); });
 </script>
 
 <template>
-  <div class="modal-overlay" role="dialog" aria-modal="true" aria-label="アカウント設定" @click="onOverlayClick">
-    <div class="modal-card">
+  <Transition name="modal-fade">
+    <div class="modal-overlay" role="dialog" aria-modal="true" aria-label="アカウント設定" @click="onOverlayClick">
+    <div class="modal-card glass">
       <div class="modal-header">
         <span class="modal-title">アカウント設定</span>
         <button type="button" class="close-btn" aria-label="閉じる" @click="emit('close')">✕</button>
@@ -183,33 +184,22 @@ onMounted(() => { void loadAccounts(); });
             <!-- Name + status -->
             <div class="provider-info">
               <span class="provider-name">{{ p.label }}</span>
-              <span v-if="connectedAccount(p.id)" class="provider-status connected">接続済み</span>
+              <span v-if="connectedAccounts(p.id).length > 0" class="provider-status connected">
+                {{ connectedAccounts(p.id).length }}件接続済み
+              </span>
               <span v-else-if="p.soon" class="provider-status soon">近日公開</span>
               <span v-else class="provider-status disconnected">未接続</span>
             </div>
 
-            <!-- Account label if connected -->
-            <span v-if="connectedAccount(p.id)" class="provider-account-label">
-              {{ connectedAccount(p.id)!.label }}
-            </span>
+            <div style="flex: 1" />
 
-            <!-- Action button -->
+            <!-- Add button: shown unless soon or maxAccounts reached -->
             <button
-              v-if="connectedAccount(p.id)"
-              type="button"
-              class="action-btn disconnect-btn"
-              :disabled="deletingId === connectedAccount(p.id)!.id"
-              @click="onDelete(connectedAccount(p.id)!.id)"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true">
-                <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-              </svg>
-            </button>
-            <button
-              v-else-if="!p.soon"
+              v-if="!p.soon && connectedAccounts(p.id).length < p.maxAccounts"
               type="button"
               class="action-btn connect-btn"
               :class="{ active: expandedProvider === p.id }"
+              :aria-label="`${p.label} アカウントを追加`"
               @click="toggleExpand(p.id)"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true">
@@ -218,7 +208,33 @@ onMounted(() => { void loadAccounts(); });
             </button>
           </div>
 
+          <!-- Connected accounts list -->
+          <div v-if="connectedAccounts(p.id).length > 0" class="account-list">
+            <div
+              v-for="account in connectedAccounts(p.id)"
+              :key="account.id"
+              class="account-row"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" class="account-check">
+                <path d="M20 6L9 17l-5-5"/>
+              </svg>
+              <span class="account-row-label">{{ account.label }}</span>
+              <button
+                type="button"
+                class="action-btn disconnect-btn"
+                :disabled="deletingId === account.id"
+                :aria-label="`${account.label} を切断`"
+                @click="onDelete(account.id)"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true">
+                  <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+
           <!-- Inline connect form -->
+          <Transition name="expand">
           <div v-if="expandedProvider === p.id" class="connect-form">
             <p v-if="formError" class="banner err" role="alert">{{ formError }}</p>
 
@@ -267,62 +283,103 @@ onMounted(() => { void loadAccounts(); });
               </div>
             </template>
           </div>
+          </Transition>
         </div>
       </div>
     </div>
   </div>
+  </Transition>
 </template>
 
 <style scoped>
+/*
+ * AccountsModal — Apple Liquid Glass 化
+ * .glass / .glass--ocean / トークンは styles.css グローバル定義を参照
+ * 5色（mist/ocean/sage/leaf/sand）＋白のみ．html.dark・ブランド色禁止
+ */
+
+/* ── オーバーレイ: ocean 由来の淡い暗幕 + blur ── */
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(16, 12, 8, 0.5);
+  background: rgba(4, 157, 191, 0.18);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 100;
 }
 
+/*
+ * .modal-card に .glass を付与（テンプレート側で class="modal-card glass"）
+ * .glass のデフォルト border-radius は --radius(24px)→ここで --radius-lg(30px) に上書き
+ * overflow-y はスクロール制御のため維持
+ */
 .modal-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: calc(var(--radius) * 1.5);
+  border-radius: var(--radius-lg) !important;
   width: 440px;
   max-width: calc(100vw - 32px);
   max-height: calc(100vh - 48px);
   overflow-y: auto;
-  box-shadow: var(--shadow-lg);
+  /* .glass の shadow を elev-3 相当に強化（モーダル深度） */
+  box-shadow:
+    var(--glass-highlight),
+    var(--glass-hairline),
+    0 24px 64px rgba(4, 157, 191, 0.20),
+    0 6px 16px rgba(4, 157, 191, 0.10) !important;
+  animation: pop-in-modal var(--dur-base) var(--ease-spring) both;
 }
 
+/* ── ヘッダー: .glass--ocean（濃ガラス＋白タイトル） ── */
 .modal-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 16px 20px;
-  border-bottom: 1px solid var(--border);
-  background: var(--brand-gradient);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   position: sticky;
   top: 0;
-  z-index: 1;
-  border-radius: calc(var(--radius) * 1.5) calc(var(--radius) * 1.5) 0 0;
+  z-index: 2;
+  /* glass--ocean 値を直展開（scoped から .glass--ocean グローバルに依存しない） */
+  background: var(--glass-ocean-bg);
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.35),
+    inset 0 0 20px rgba(255, 255, 255, 0.10),
+    0 0 0 1px rgba(255, 255, 255, 0.18),
+    var(--glass-shadow);
+  color: var(--white);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
 }
 .modal-title {
   font-size: 15px;
   font-weight: 700;
-  color: #fff;
+  color: var(--white);
 }
 .close-btn {
   background: none;
   border: none;
   font-size: 16px;
   color: rgba(255, 255, 255, 0.75);
-  padding: 4px;
+  padding: 4px 6px;
   line-height: 1;
   cursor: pointer;
-  transition: color 0.15s;
+  border-radius: var(--radius-pill);
+  transition:
+    color var(--dur-fast) var(--ease-standard),
+    background var(--dur-fast) var(--ease-standard),
+    transform var(--dur-fast) var(--ease-spring);
 }
-.close-btn:hover { color: #fff; }
+.close-btn:hover {
+  color: var(--white);
+  background: rgba(255, 255, 255, 0.18);
+  transform: scale(1.15);
+}
+.close-btn:active {
+  transform: scale(0.9);
+  transition-duration: 80ms;
+}
 
 /* ── Provider list ── */
 .provider-list {
@@ -332,14 +389,27 @@ onMounted(() => { void loadAccounts(); });
   gap: 8px;
 }
 
+/*
+ * .provider-row は白〜mist 地 + sage 枠 + 角丸
+ * expanded 時は ocean 枠へ切り替え
+ */
 .provider-row {
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   overflow: hidden;
-  transition: border-color 0.15s;
+  background: rgba(255, 255, 255, 0.72);
+  transition:
+    border-color var(--dur-fast) var(--ease-standard),
+    box-shadow var(--dur-fast) var(--ease-standard),
+    transform var(--dur-fast) var(--ease-out-expo);
+}
+.provider-row:hover:not(.expanded) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(4, 157, 191, 0.10);
 }
 .provider-row.expanded {
-  border-color: var(--brand-blue);
+  border-color: var(--ocean);
+  box-shadow: 0 0 0 2px var(--ocean-12);
 }
 
 .provider-main {
@@ -347,9 +417,10 @@ onMounted(() => { void loadAccounts(); });
   align-items: center;
   gap: 12px;
   padding: 12px 14px;
-  background: var(--snow-surface);
+  background: transparent;
 }
 
+/* プロバイダアイコン: ocean 塗り（sage の場合はそのまま残す） */
 .provider-icon {
   width: 36px;
   height: 36px;
@@ -369,26 +440,67 @@ onMounted(() => { void loadAccounts(); });
 .provider-name {
   font-size: 14px;
   font-weight: 600;
-  color: var(--text);
+  color: var(--ocean);
 }
 .provider-status {
   font-size: 11px;
   font-weight: 600;
 }
-.provider-status.connected { color: var(--success); }
-.provider-status.disconnected { color: var(--text-muted); }
-.provider-status.soon { color: var(--text-muted); }
+/* connected: leaf ドット + ocean 文字 */
+.provider-status.connected {
+  color: var(--ocean);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.provider-status.connected::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--leaf);
+  flex-shrink: 0;
+}
+/* 未接続・近日公開: ocean 62% */
+.provider-status.disconnected { color: var(--ocean); }
+.provider-status.soon { color: var(--sage); }
 
-.provider-account-label {
+/* ── Connected accounts list ── */
+.account-list {
+  border-top: 1px solid var(--border);
+  background: rgba(228, 235, 242, 0.55); /* mist 半透明 */
+  display: flex;
+  flex-direction: column;
+}
+
+.account-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.account-row:last-child {
+  border-bottom: none;
+}
+
+/* チェックアイコン: leaf 可 */
+.account-check {
+  color: var(--leaf);
+  flex-shrink: 0;
+}
+
+.account-row-label {
   flex: 1;
-  font-size: 12px;
-  color: var(--text-muted);
+  font-size: 13px;
+  color: var(--ocean);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  text-align: right;
 }
 
+/* ── アクションボタン（+ / ×） ── */
 .action-btn {
   width: 28px;
   height: 28px;
@@ -398,36 +510,50 @@ onMounted(() => { void loadAccounts(); });
   justify-content: center;
   cursor: pointer;
   flex-shrink: 0;
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  transition:
+    background var(--dur-fast) var(--ease-standard),
+    border-color var(--dur-fast) var(--ease-standard),
+    color var(--dur-fast) var(--ease-standard),
+    transform var(--dur-fast) var(--ease-spring);
 }
+.action-btn:hover {
+  transform: scale(1.15);
+}
+.action-btn:active {
+  transform: scale(0.9);
+  transition-duration: 80ms;
+}
+/* + ボタン: ocean 枠 + ocean 文字 → hover/active で ocean 塗り＋白 */
 .connect-btn {
-  border: 1px solid var(--brand-blue);
-  background: var(--surface);
-  color: var(--brand-blue);
+  border: 1px solid var(--ocean);
+  background: rgba(255, 255, 255, 0.55);
+  color: var(--ocean);
 }
 .connect-btn:hover,
 .connect-btn.active {
-  background: var(--brand-blue);
-  color: #fff;
+  background: var(--ocean);
+  color: var(--white);
 }
+/* 切断(×)ボタン: sage 色 → hover で ocean（赤なし） */
 .disconnect-btn {
   border: none;
   background: none;
-  color: var(--text-muted);
+  color: var(--ocean);
 }
 .disconnect-btn:hover:not(:disabled) {
-  color: var(--danger);
+  color: var(--ocean);
+  background: var(--ocean-12);
 }
 .disconnect-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
 
-/* ── Inline connect form ── */
+/* ── インライン接続フォーム ── */
 .connect-form {
   padding: 14px 14px 16px;
   border-top: 1px solid var(--border);
-  background: var(--surface);
+  background: rgba(228, 235, 242, 0.40);
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -441,82 +567,171 @@ onMounted(() => { void loadAccounts(); });
 .label {
   font-size: 11px;
   font-weight: 600;
-  color: var(--text-muted);
+  color: var(--ocean);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
+/* 入力: 白〜mist 地 + sage 枠 + ocean 文字 */
 .input {
   font: inherit;
   font-size: 13px;
   padding: 8px 10px;
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  background: var(--snow-surface);
-  color: var(--text);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--sage);
+  background: rgba(255, 255, 255, 0.75);
+  color: var(--ocean);
   outline: none;
-  transition: border-color 0.15s;
+  box-shadow: 0 0 0 0px var(--ocean-12);
+  transition:
+    border-color var(--dur-fast) var(--ease-standard),
+    box-shadow var(--dur-base) var(--ease-out-expo);
 }
-.input:focus { border-color: var(--brand-blue); }
+.input:focus {
+  border-color: var(--ocean);
+  box-shadow: 0 0 0 3px var(--ocean-12);
+}
 
 .form-footer {
   display: flex;
   justify-content: flex-end;
 }
+
+/* 主要ボタン（接続する）: ocean 塗り + 白 + pill + .lift 相当の hover */
 .btn-primary {
   font-size: 13px;
   font-weight: 600;
   padding: 7px 18px;
   border-radius: var(--radius-pill);
   border: none;
-  background: var(--brand-gradient);
-  color: #fff;
+  background: var(--ocean);
+  color: var(--white);
   cursor: pointer;
-  box-shadow: var(--shadow-sm);
-  transition: opacity 0.15s;
+  box-shadow: var(--glass-shadow);
+  transition:
+    background var(--dur-fast) var(--ease-standard),
+    transform var(--dur-fast) var(--ease-spring),
+    box-shadow var(--dur-fast) var(--ease-standard);
 }
-.btn-primary:hover:not(:disabled) { opacity: 0.88; }
+.btn-primary:hover:not(:disabled) {
+  background: var(--ocean-72);
+  transform: translateY(-1px) scale(1.03);
+  box-shadow: var(--glass-shadow-hover);
+}
+.btn-primary:active:not(:disabled) {
+  transform: scale(0.94);
+  transition-duration: 80ms;
+}
 .btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }
 
+/* OAuth ボタン: ocean 塗り + 白 + pill + .lift（全幅） */
 .oauth-btn {
   width: 100%;
   padding: 9px;
-  background: var(--brand-gradient);
-  color: #fff;
+  background: var(--ocean);
+  color: var(--white);
   border: none;
-  border-radius: var(--radius);
+  border-radius: var(--radius-pill);
   cursor: pointer;
   font-size: 13px;
   font-weight: 600;
-  box-shadow: var(--shadow-sm);
-  transition: opacity 0.15s;
+  box-shadow: var(--glass-shadow);
+  transition:
+    background var(--dur-fast) var(--ease-standard),
+    transform var(--dur-fast) var(--ease-spring),
+    box-shadow var(--dur-fast) var(--ease-standard);
 }
-.oauth-btn:hover:not(:disabled) { opacity: 0.88; }
+.oauth-btn:hover:not(:disabled) {
+  background: var(--ocean-72);
+  transform: translateY(-1px) scale(1.03);
+  box-shadow: var(--glass-shadow-hover);
+}
+.oauth-btn:active:not(:disabled) {
+  transform: scale(0.94);
+  transition-duration: 80ms;
+}
 .oauth-btn:disabled { opacity: 0.55; cursor: not-allowed; }
 
+/* .oauth-btn--github は .oauth-btn の ocean で網羅（ブランド色廃止・5色統一） */
+
+/* エラーバナー: 白地（ガラス）+ ocean 太枠 + ocean 文字（赤なし・danger=ocean） */
 .banner {
   margin: 0;
   padding: 8px 12px;
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   font-size: 13px;
 }
 .banner.err {
-  color: var(--danger);
-  background: var(--danger-weak);
-  border: 1px solid var(--danger);
+  color: var(--ocean);
+  background: rgba(255, 255, 255, 0.85);
+  border: 2px solid var(--ocean);
+  font-weight: 600;
 }
 .error-text {
   font-size: 12px;
-  color: var(--danger);
+  color: var(--ocean);
   margin: 0;
+  font-weight: 600;
 }
 .muted-msg {
   font-size: 13px;
-  color: var(--text-muted);
+  color: var(--ocean);
   padding: 8px 0;
   margin: 0;
 }
 
-.oauth-btn--github {
-  background: #24292e;
+/* ── <Transition name="modal-fade"> ── */
+/*
+ * オーバーレイ: opacity のみ（レイアウト変更なし）
+ * 入場: out-expo で滑らか・退場: standard で自然に消える
+ * カード自体は pop-in @keyframes（scale + opacity）で入場
+ */
+.modal-fade-enter-active {
+  transition: opacity var(--dur-base) var(--ease-out-expo);
+}
+.modal-fade-leave-active {
+  transition: opacity var(--dur-base) var(--ease-standard);
+}
+.modal-fade-enter-from,
+.modal-fade-leave-to {
+  opacity: 0;
+}
+
+/* pop-in を spring + out-expo ブレンドに変更（scale + translateY） */
+@keyframes pop-in-modal {
+  from {
+    opacity: 0;
+    transform: scale(0.90) translateY(12px);
+  }
+  60% {
+    opacity: 1;
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* ── <Transition name="expand"> アコーディオン展開 ── */
+/*
+ * height ではなく opacity + translateY で実装（レイアウトプロパティ禁止）
+ * 展開：spring で少し弾む，折りたたみ：out-expo で素直に消える
+ */
+.expand-enter-active {
+  transition:
+    opacity var(--dur-base) var(--ease-spring),
+    transform var(--dur-base) var(--ease-spring);
+}
+.expand-leave-active {
+  transition:
+    opacity var(--dur-fast) var(--ease-standard),
+    transform var(--dur-fast) var(--ease-standard);
+}
+.expand-enter-from {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+.expand-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
 }
 </style>

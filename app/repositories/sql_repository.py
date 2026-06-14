@@ -170,6 +170,22 @@ class SqlRepository:
             stmt = stmt.where(
                 MessageRecordORM.received_at <= _to_naive_utc(q.received_before)
             )
+        if q.email_categories:
+            stmt = stmt.where(
+                func.json_extract(MessageRecordORM.email, "$.email_category").in_(
+                    q.email_categories
+                )
+            )
+        if q.is_promotional is not None:
+            stmt = stmt.where(
+                func.json_extract(MessageRecordORM.analysis, "$.is_promotional")
+                == (1 if q.is_promotional else 0)
+            )
+        if q.is_security_notification is not None:
+            stmt = stmt.where(
+                func.json_extract(MessageRecordORM.analysis, "$.is_security_notification")
+                == (1 if q.is_security_notification else 0)
+            )
         # message_id を第2キーにして決定的な順序にする.
         stmt = stmt.order_by(direction, MessageRecordORM.message_id.asc())
         stmt = stmt.limit(q.limit).offset(q.offset)
