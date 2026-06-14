@@ -10,15 +10,25 @@ export interface EmailMessage {
   snippet: string;
   is_unread: boolean;
   body_text: string | null;
+  is_spam: boolean;
 }
 
 export type TaskWeight = "light" | "medium" | "heavy";
 
+export type RequestType =
+  | "reply_required"
+  | "task_required"
+  | "review_required"
+  | "approval_required"
+  | "waiting_other"
+  | "info_only";
+
 export interface AnalysisResult {
-  importance: number; // 1-5
-  needs_reply: boolean;
+  importance: number; // 1-6
   task_weight: TaskWeight;
-  category: string;
+  request_type: RequestType;
+  is_promotional: boolean;
+  is_security_notification: boolean;
   summary: string;
   suggested_action: string | null;
   deadline: string | null;
@@ -39,7 +49,9 @@ export interface MessageRecord {
   analysis: AnalysisResult | null;
   state: MessageState;
   triage_score: number;
+  account_address: string;
   version: number;
+  is_archived: boolean;
   created_at: string | null;
   updated_at: string | null;
 }
@@ -51,3 +63,33 @@ export const ACTIONABLE_STATES: readonly MessageState[] = [
   "snoozed",
   "dismissed",
 ] as const;
+
+export interface FeedbackCorrection {
+  importance: number;
+  request_type: RequestType;
+  is_promotional: boolean;
+  is_security_notification: boolean;
+  reason: string;
+}
+
+export interface AccountConfig {
+  id: string;
+  provider: string;
+  label: string;
+  address: string;
+  auth_type: string;    // 'imap' | 'oauth'
+  auth_status: string;  // 'ok' | 'reauth_required' | 'revoked'
+  created_at: string | null;
+}
+
+export interface OAuthStartResponse {
+  auth_url: string;
+  state: string;
+}
+
+export interface AccountConfigCreate {
+  provider: string;
+  label: string;
+  address: string;
+  credential: string;
+}

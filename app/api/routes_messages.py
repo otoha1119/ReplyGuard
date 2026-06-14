@@ -5,6 +5,7 @@
 （NotFound/Conflict/Transition）は main の例外ハンドラが HTTP へ写像する.
 """
 
+from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -12,11 +13,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.api.auth import authenticate, create_access_token
 from app.api.deps import (
     AuthDep,
+    get_feedback_service,
     get_ingestion,
     get_repo,
     get_settings,
     get_state_service,
 )
+from app.services.feedback_service import FeedbackService
 from app.api.schemas import (
     IngestResult,
     LoginRequest,
@@ -24,7 +27,7 @@ from app.api.schemas import (
     TokenResponse,
 )
 from app.config import Settings
-from app.models import MessageRecord, MessageState
+from app.models import FeedbackCorrection, MessageRecord, MessageState
 from app.ports import MessageQuery, Repository
 from app.services.ingestion import IngestionService
 from app.services.state_service import StateService
@@ -41,19 +44,39 @@ router = APIRouter()
 def list_messages(
     state: MessageState | None = Query(default=None),
     unread_only: bool = Query(default=False),
+    archived: bool = Query(default=False),
     limit: int = Query(default=100, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
-    order_by: Literal["triage_score", "received_at"] = Query(default="triage_score"),
+    order_by: Literal["triage_score", "received_at", "importance"] = Query(
+        default="triage_score"
+    ),
     descending: bool = Query(default=True),
+    providers: list[str] = Query(default=[]),
+    account_addresses: list[str] = Query(default=[]),
+    importance_min: int | None = Query(default=None, ge=1, le=6),
+    received_after: datetime | None = Query(default=None),
+    received_before: datetime | None = Query(default=None),
+    email_categories: list[str] = Query(default=[]),
+    is_promotional: bool | None = Query(default=None),
+    is_security_notification: bool | None = Query(default=None),
     repo: Repository = Depends(get_repo),
 ) -> list[MessageRecord]:
     q = MessageQuery(
         state=state,
         unread_only=unread_only,
+        archived=archived,
         limit=limit,
         offset=offset,
         order_by=order_by,
         descending=descending,
+        providers=providers,
+        account_addresses=account_addresses,
+        importance_min=importance_min,
+        received_after=received_after,
+        received_before=received_before,
+        email_categories=email_categories,
+        is_promotional=is_promotional,
+        is_security_notification=is_security_notification,
     )
     return repo.query(q)
 
@@ -93,6 +116,42 @@ def update_message_state(
 
 
 @router.post(
+    "/messages/{message_id}/archive",
+    response_model=MessageRecord,
+    tags=["messages"],
+    dependencies=[AuthDep],
+)
+def archive_message(
+    message_id: str,
+    repo: Repository = Depends(get_repo),
+) -> MessageRecord:
+    return repo.set_archived(message_id, True)
+
+
+@router.post(
+    "/messages/{message_id}/unarchive",
+    response_model=MessageRecord,
+    tags=["messages"],
+    dependencies=[AuthDep],
+)
+def unarchive_message(
+    message_id: str,
+    repo: Repository = Depends(get_repo),
+) -> MessageRecord:
+    return repo.unarchive(message_id)
+
+
+@router.get(
+    "/providers",
+    response_model=list[str],
+    tags=["messages"],
+    dependencies=[AuthDep],
+)
+def list_providers(repo: Repository = Depends(get_repo)) -> list[str]:
+    return repo.list_providers()
+
+
+@router.post(
     "/ingest",
     response_model=IngestResult,
     tags=["ingest"],
@@ -102,6 +161,30 @@ def trigger_ingest(
     ingestion: IngestionService = Depends(get_ingestion),
 ) -> dict:
     return ingestion.run_once()
+
+
+@router.post(
+    "/messages/{message_id}/feedback",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["messages"],
+    dependencies=[AuthDep],
+)
+def submit_feedback(
+    message_id: str,
+    body: FeedbackCorrection,
+    svc: FeedbackService | None = Depends(get_feedback_service),
+    repo: Repository = Depends(get_repo),
+) -> None:
+    """ユーザーによる分析結果の修正をベクトル DB に保存する.
+
+    OLLAMA_BASE_URL 未設定の場合は 503 を返す.
+    """
+    if svc is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="フィードバック機能は無効です（OLLAMA_BASE_URL を設定してください）",
+        )
+    svc.submit(message_id, body)
 
 
 @router.post("/auth/login", response_model=TokenResponse, tags=["auth"])

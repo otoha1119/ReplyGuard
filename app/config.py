@@ -16,7 +16,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         # 後の file が前を上書き（app.env が gmail.env を上書き）. 欠損ファイルは無視.
-        env_file=("secrets/gmail.env", "secrets/app.env"),
+        env_file=("secrets/gmail.env", "secrets/github.env", "secrets/app.env"),
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
@@ -25,6 +25,17 @@ class Settings(BaseSettings):
     # === Gmail（取得・正規化層）===
     gmail_address: str = ""
     gmail_app_password: str = ""
+    # OAuth フロー設定（アプリパスワード方式の代替）
+    gmail_oauth_client_id:     str = ""
+    gmail_oauth_client_secret: str = ""
+    gmail_oauth_redirect_uri:  str = "http://127.0.0.1:8000/auth/gmail/callback"
+    frontend_url:              str = "http://localhost:5173"
+
+    # === GitHub（取得・正規化層 / OAuth App）===
+    # OAuth App（classic）の web flow. notifications scope のみ要求（読み取り専用は運用規律で担保）.
+    github_oauth_client_id:     str = ""
+    github_oauth_client_secret: str = ""
+    github_oauth_redirect_uri:  str = "http://127.0.0.1:8000/auth/github/callback"
 
     # === DB（永続化層）===
     # 既定はローカル SQLite（追加アカウント不要）. Supabase/Postgres に上げる時は
@@ -54,14 +65,32 @@ class Settings(BaseSettings):
     ingest_limit: int = 10
 
     # === LLM 分析層 ===
-    # "stub"（既定・オフライン）| "anthropic" | "openai"
+    # "stub"（既定・オフライン）| "anthropic" | "openai" | "gemini" | "ollama"
     analyzer: str = "stub"
     anthropic_api_key: str = ""
     openai_api_key: str = ""
-    llm_model: str = "claude-sonnet-4-6"
+    gemini_api_key: str = ""
+    # Ollama（別PCで動かす OpenAI 互換サーバ）. 例 http://192.168.1.50:11434
+    # API キー不要・従量課金/レート制限なし・本文は LAN 外に出ない. これを設定して
+    # ANALYZER=ollama にすると有効. 未設定なら stub にフォールバック.
+    ollama_base_url: str = ""
+    # 空ならプロバイダ別の既定モデルを factory が解決する（例 gemini→gemini-2.5-flash-lite）.
+    llm_model: str = ""
     llm_timeout_seconds: int = 30
     # 本文をLLMへ渡す際の最大文字数（コスト/漏洩面の上限）
     llm_max_body_chars: int = 4000
+
+    # === フィードバック学習（Chroma + Ollama embedding） ===
+    # ollama_base_url が設定されている場合に有効. 未設定ならフィードバック機能は無効.
+    ollama_embed_model: str = "bge-m3"
+    chroma_path: str = "./data/chroma"
+    feedback_top_k: int = 3
+    # コサイン距離の閾値（0=完全一致, 1=無関係）. これ以上遠いFBはプロンプトに含めない.
+    feedback_distance_threshold: float = 0.5
+
+    # === リモート削除/アーカイブ追随同期 ===
+    sync_remote_changes: bool = True
+    auto_archive_importance_threshold: int = 3
 
     # === 通知層 ===
     # "log"（既定・オフライン）| "email" | "slack"

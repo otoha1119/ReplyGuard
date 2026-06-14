@@ -14,9 +14,9 @@ from tests.conftest import make_email
 
 VALID_JSON = """{
   "importance": 5,
-  "needs_reply": true,
   "task_weight": "heavy",
-  "category": "action_required",
+  "request_type": "reply_required",
+  "is_promotional": false,
   "summary": "契約書の返信依頼",
   "suggested_action": "本日中に返信する",
   "deadline": "2026-06-15T00:00:00+00:00",
@@ -49,6 +49,17 @@ class FakeOpenAIClient:
         return SimpleNamespace(choices=[SimpleNamespace(message=message)])
 
 
+class FakeGeminiClient:
+    """client.models.generate_content(...) -> resp.text を模倣する（google-genai）."""
+
+    def __init__(self, text: str):
+        self._text = text
+        self.models = SimpleNamespace(generate_content=self._generate)
+
+    def _generate(self, **kwargs):
+        return SimpleNamespace(text=self._text)
+
+
 def _make_anthropic(text: str) -> LLMAnalyzer:
     return LLMAnalyzer(
         provider="anthropic",
@@ -71,10 +82,34 @@ def _make_openai(text: str) -> LLMAnalyzer:
     )
 
 
+def _make_gemini(text: str) -> LLMAnalyzer:
+    return LLMAnalyzer(
+        provider="gemini",
+        api_key="dummy",
+        model="gemini-2.5-flash-lite",
+        timeout_seconds=30,
+        max_body_chars=4000,
+        client=FakeGeminiClient(text),
+    )
+
+
+def _make_ollama(text: str) -> LLMAnalyzer:
+    # Ollama は OpenAI 互換なので FakeOpenAIClient をそのまま流用できる.
+    return LLMAnalyzer(
+        provider="ollama",
+        api_key="ollama",
+        model="qwen2.5",
+        timeout_seconds=30,
+        max_body_chars=4000,
+        base_url="http://ollama.local:11434/v1",
+        client=FakeOpenAIClient(text),
+    )
+
+
 def test_anthropic_valid_json_parsed():
     result = _make_anthropic(VALID_JSON).analyze(make_email())
     assert result.importance == 5
-    assert result.needs_reply is True
+    assert result.request_type == "reply_required"
     assert result.task_weight == "heavy"
     assert result.analyzer == "anthropic"
     assert result.deadline is not None
@@ -84,6 +119,41 @@ def test_openai_valid_json_parsed():
     result = _make_openai(VALID_JSON).analyze(make_email())
     assert result.importance == 5
     assert result.analyzer == "openai"
+
+
+def test_gemini_valid_json_parsed():
+    result = _make_gemini(VALID_JSON).analyze(make_email())
+    assert result.importance == 5
+    assert result.request_type == "reply_required"
+    assert result.task_weight == "heavy"
+    assert result.analyzer == "gemini"
+    assert result.deadline is not None
+
+
+def test_gemini_invalid_json_falls_back_to_stub():
+    result = _make_gemini("これは JSON ではありません").analyze(make_email())
+    assert result.analyzer == "stub"
+
+
+def test_gemini_extra_key_falls_back():
+    bad = VALID_JSON.replace(
+        '"reason": "締切が明示され対応が必要"',
+        '"reason": "x", "exec": "rm -rf /"',
+    )
+    result = _make_gemini(bad).analyze(make_email())
+    assert result.analyzer == "stub"
+
+
+def test_ollama_valid_json_parsed():
+    result = _make_ollama(VALID_JSON).analyze(make_email())
+    assert result.importance == 5
+    assert result.request_type == "reply_required"
+    assert result.analyzer == "ollama"
+
+
+def test_ollama_invalid_json_falls_back_to_stub():
+    result = _make_ollama("これは JSON ではありません").analyze(make_email())
+    assert result.analyzer == "stub"
 
 
 def test_json_wrapped_in_code_fence_is_parsed():
@@ -100,6 +170,12 @@ def test_invalid_json_falls_back_to_stub():
 
 def test_out_of_range_importance_falls_back():
     bad = VALID_JSON.replace('"importance": 5', '"importance": 99')
+    result = _make_anthropic(bad).analyze(make_email())
+    assert result.analyzer == "stub"
+
+
+def test_invalid_request_type_falls_back():
+    bad = VALID_JSON.replace('"request_type": "reply_required"', '"request_type": "unknown"')
     result = _make_anthropic(bad).analyze(make_email())
     assert result.analyzer == "stub"
 
@@ -146,7 +222,7 @@ def test_unsupported_provider_falls_back():
     assert result.analyzer == "stub"
 
 
-@pytest.mark.parametrize("factory", [_make_anthropic, _make_openai])
+@pytest.mark.parametrize("factory", [_make_anthropic, _make_openai, _make_gemini])
 def test_body_is_truncated_to_max_chars(factory):
     """max_body_chars を超える本文でもクラッシュせず動く（切り詰めの経路を踏む）."""
     analyzer = factory(VALID_JSON)

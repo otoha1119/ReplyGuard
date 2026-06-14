@@ -15,15 +15,14 @@ def _analyze(**kwargs) -> AnalysisResult:
     return StubAnalyzer().analyze(make_email(**kwargs))
 
 
-def test_urgent_unread_raises_importance_and_needs_reply():
+def test_urgent_unread_raises_importance_and_request_type():
     result = _analyze(
         subject="【至急】契約書のご返信をお願いします",
         body_text="本日中にご返信ください。",
         is_unread=True,
     )
     assert result.importance >= 4
-    assert result.needs_reply is True
-    assert result.category == "action_required"
+    assert result.request_type == "reply_required"
     assert result.task_weight in ("medium", "heavy")
     assert result.analyzer == "stub"
 
@@ -32,7 +31,7 @@ def test_urgent_read_is_slightly_lower_than_unread():
     read = _analyze(subject="至急 返信ください", body_text="x", is_unread=False)
     unread = _analyze(subject="至急 返信ください", body_text="x", is_unread=True)
     assert unread.importance > read.importance
-    assert read.needs_reply is True
+    assert read.request_type == "reply_required"
 
 
 def test_promo_keywords_lower_importance():
@@ -43,8 +42,8 @@ def test_promo_keywords_lower_importance():
         is_unread=True,
     )
     assert result.importance <= 2
-    assert result.needs_reply is False
-    assert result.category == "promo"
+    assert result.request_type == "info_only"
+    assert result.is_promotional is True
     assert result.suggested_action is None
 
 
@@ -55,8 +54,8 @@ def test_neutral_mail_is_default_importance():
         is_unread=True,
     )
     assert result.importance == 3
-    assert result.needs_reply is False
-    assert result.category == "fyi"
+    assert result.request_type == "info_only"
+    assert result.is_promotional is False
     assert result.task_weight == "light"
 
 
@@ -90,7 +89,7 @@ def test_no_deadline_when_absent():
 def test_heavy_task_weight_for_long_urgent_body():
     long_body = "返信が必要です。" + "詳細な背景説明。" * 200
     result = _analyze(subject="至急ご対応を", body_text=long_body, is_unread=True)
-    assert result.needs_reply is True
+    assert result.request_type == "reply_required"
     assert result.task_weight == "heavy"
 
 
@@ -111,4 +110,4 @@ def test_deterministic_same_input_same_output():
 def test_importance_always_in_range():
     for subject in ("至急 至急 緊急 重要 締切 返信", "セール お知らせ 広告", "通常"):
         result = _analyze(subject=subject)
-        assert 1 <= result.importance <= 5
+        assert 1 <= result.importance <= 6

@@ -1,13 +1,13 @@
-"""実 LLM 分析器（Anthropic / OpenAI）.
+"""実 LLM 分析器（Anthropic / OpenAI / Gemini / Ollama）.
 
-設定で analyzer="anthropic"/"openai" かつ API キーがある時だけ使う. SDK 呼び出しの
+設定で analyzer="anthropic"/"openai"/"gemini"/"ollama" の時だけ使う. SDK 呼び出しの
 失敗・タイムアウト・不正出力・スキーマ違反では決して落とさず, StubAnalyzer の結果へ
 フォールバックする（RESILIENCE）.
 
 セキュリティ:
 - 本文を外部へ送るのは, ここでの正規の LLM API 呼び出しに限る.
 - API キー・本文をログに残さない（LLM02）. 失敗時も例外型名のみを記録する.
-- LLM 出力は信用せず AnalysisResult（extra="forbid", importance 1-5）で検証し,
+- LLM 出力は信用せず AnalysisResult（extra="forbid", importance 1-6）で検証し,
   範囲外・欠損・余計なキーは弾く（LLM05）.
 """
 
@@ -21,11 +21,86 @@ from app.analysis.prompt import SYSTEM_INSTRUCTION, build_user_content
 from app.analysis.stub import StubAnalyzer
 from app.models import AnalysisResult, EmailMessage
 from app.ports.analyzer import Analyzer
+from app.ports.vector_store import FeedbackEntry
 
 logger = logging.getLogger(__name__)
 
 # 構造化出力は短い. 上限を控えめにしてコストを抑える.
 _MAX_TOKENS = 1024
+
+# AnalysisResult のうち LLM が出力するフィールドの JSON Schema（共通定義）.
+# "analyzer" は呼び出し側で上書きするため含めない.
+_RESPONSE_PROPERTIES: dict[str, Any] = {
+    "importance": {"type": "integer", "minimum": 1, "maximum": 6},
+    "task_weight": {"type": "string", "enum": ["light", "medium", "heavy"]},
+    "request_type": {
+        "type": "string",
+        "enum": [
+            "reply_required",
+            "task_required",
+            "review_required",
+            "approval_required",
+            "waiting_other",
+            "info_only",
+        ],
+    },
+    "is_promotional": {"type": "boolean"},
+    "is_security_notification": {"type": "boolean"},
+    "summary": {"type": "string"},
+    "suggested_action": {"type": ["string", "null"]},
+    "deadline": {"type": ["string", "null"]},
+    "reason": {"type": "string"},
+}
+
+# OpenAI / Ollama（OpenAI 互換）向け: response_format = json_schema (strict).
+_OPENAI_RESPONSE_FORMAT: dict[str, Any] = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "email_analysis",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": _RESPONSE_PROPERTIES,
+            "required": list(_RESPONSE_PROPERTIES.keys()),
+            "additionalProperties": False,
+        },
+    },
+}
+
+# Gemini 向け: response_schema（OpenAPI 風. type は大文字, nullable で表現）.
+_GEMINI_RESPONSE_SCHEMA: dict[str, Any] = {
+    "type": "OBJECT",
+    "properties": {
+        "importance": {"type": "INTEGER"},
+        "task_weight": {"type": "STRING", "enum": ["light", "medium", "heavy"]},
+        "request_type": {
+            "type": "STRING",
+            "enum": [
+                "reply_required",
+                "task_required",
+                "review_required",
+                "approval_required",
+                "waiting_other",
+                "info_only",
+            ],
+        },
+        "is_promotional": {"type": "BOOLEAN"},
+        "is_security_notification": {"type": "BOOLEAN"},
+        "summary": {"type": "STRING"},
+        "suggested_action": {"type": "STRING", "nullable": True},
+        "deadline": {"type": "STRING", "nullable": True},
+        "reason": {"type": "STRING"},
+    },
+    "required": [
+        "importance",
+        "task_weight",
+        "request_type",
+        "is_promotional",
+        "is_security_notification",
+        "summary",
+        "reason",
+    ],
+}
 
 
 class LLMAnalyzer:
@@ -41,18 +116,55 @@ class LLMAnalyzer:
         max_body_chars: int,
         client: Any | None = None,
         fallback: Analyzer | None = None,
+        base_url: str | None = None,
     ) -> None:
         self.provider = provider
         self._api_key = api_key
         self.model = model
         self.timeout_seconds = timeout_seconds
         self.max_body_chars = max_body_chars
+        self._base_url = base_url  # OpenAI 互換サーバ（Ollama 等）の base url
         self._client = client  # テストでモック注入 / None なら遅延生成
         self._fallback: Analyzer = fallback or StubAnalyzer()
+        # フィードバック学習（configure_feedback で後から注入）
+        self._fb_embedding: Any | None = None
+        self._fb_vector_store: Any | None = None
+        self._fb_top_k: int = 3
+        self._fb_threshold: float = 0.5
+
+    def configure_feedback(
+        self,
+        embedding: Any,
+        vector_store: Any,
+        top_k: int = 3,
+        distance_threshold: float = 0.5,
+    ) -> None:
+        """フィードバック検索コンポーネントを注入する（起動時に main.py から呼ぶ）."""
+        self._fb_embedding = embedding
+        self._fb_vector_store = vector_store
+        self._fb_top_k = top_k
+        self._fb_threshold = distance_threshold
+
+    def _retrieve_feedback(self, email: EmailMessage) -> list[FeedbackEntry]:
+        """類似フィードバックを検索して閾値フィルタ後のリストを返す."""
+        if self._fb_embedding is None or self._fb_vector_store is None:
+            return []
+        try:
+            embed_text = f"{email.subject}\n{email.sender}\n{email.snippet}"
+            vector = self._fb_embedding.embed(embed_text)
+            entries = self._fb_vector_store.query_similar(vector, self._fb_top_k)
+            filtered = [e for e in entries if e.distance <= self._fb_threshold]
+            if entries and not filtered:
+                logger.debug("フィードバック: 最近傍距離=%.3f > 閾値=%.3f のため注入なし", entries[0].distance, self._fb_threshold)
+            return filtered
+        except Exception as exc:
+            logger.warning("フィードバック取得失敗（続行）: %s", type(exc).__name__)
+            return []
 
     def analyze(self, email: EmailMessage) -> AnalysisResult:
+        feedback_entries = self._retrieve_feedback(email)
         try:
-            raw = self._call(email)
+            raw = self._call(email, feedback_entries)
             data = self._parse(raw)
             data["analyzer"] = self.provider
             return AnalysisResult(**data)
@@ -64,12 +176,16 @@ class LLMAnalyzer:
             )
             return self._fallback.analyze(email)
 
-    def _call(self, email: EmailMessage) -> str:
-        content = build_user_content(email, self.max_body_chars)
+    def _call(self, email: EmailMessage, feedback_entries: list[FeedbackEntry] | None = None) -> str:
+        content = build_user_content(email, self.max_body_chars, feedback_entries or [])
         if self.provider == "anthropic":
             return self._call_anthropic(content)
         if self.provider == "openai":
             return self._call_openai(content)
+        if self.provider == "gemini":
+            return self._call_gemini(content)
+        if self.provider == "ollama":
+            return self._call_ollama(content)
         raise ValueError(f"未対応の provider: {self.provider}")
 
     def _call_anthropic(self, content: str) -> str:
@@ -97,12 +213,60 @@ class LLMAnalyzer:
         resp = client.chat.completions.create(
             model=self.model,
             max_tokens=_MAX_TOKENS,
+            response_format=_OPENAI_RESPONSE_FORMAT,  # JSON Schema 強制（出力は _parse で再検証）
             messages=[
                 {"role": "system", "content": SYSTEM_INSTRUCTION},
                 {"role": "user", "content": content},
             ],
         )
         return resp.choices[0].message.content
+
+    def _call_ollama(self, content: str) -> str:
+        # Ollama の OpenAI 互換エンドポイント（/v1）を openai SDK で叩く.
+        # 別PCの自前サーバなので従量課金・レート制限なし. 本文は LAN 外に出ない.
+        client = self._client
+        if client is None:
+            import openai  # 遅延 import
+
+            client = openai.OpenAI(
+                api_key=self._api_key or "ollama",
+                base_url=self._base_url,
+                timeout=self.timeout_seconds,
+            )
+        resp = client.chat.completions.create(
+            model=self.model,
+            max_tokens=_MAX_TOKENS,
+            response_format=_OPENAI_RESPONSE_FORMAT,  # JSON Schema 強制（出力は _parse で再検証）
+            messages=[
+                {"role": "system", "content": SYSTEM_INSTRUCTION},
+                {"role": "user", "content": content},
+            ],
+        )
+        return resp.choices[0].message.content
+
+    def _call_gemini(self, content: str) -> str:
+        client = self._client
+        if client is None:
+            from google import genai  # 遅延 import（未導入なら ImportError → フォールバック）
+
+            # timeout は http_options でミリ秒指定（SDK 仕様）.
+            client = genai.Client(
+                api_key=self._api_key,
+                http_options={"timeout": self.timeout_seconds * 1000},
+            )
+        # response_mime_type + response_schema で JSON スキーマを強制する. それでも
+        # 出力は下の _parse + AnalysisResult で再検証する（LLM05: 信用しない）.
+        resp = client.models.generate_content(
+            model=self.model,
+            contents=content,
+            config={
+                "system_instruction": SYSTEM_INSTRUCTION,
+                "max_output_tokens": _MAX_TOKENS,
+                "response_mime_type": "application/json",
+                "response_schema": _GEMINI_RESPONSE_SCHEMA,
+            },
+        )
+        return resp.text
 
     @staticmethod
     def _parse(raw: str) -> dict[str, Any]:

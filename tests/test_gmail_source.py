@@ -48,14 +48,42 @@ def _fetch_item(uid: int, raw: bytes, *, seen: bool) -> tuple:
     return (descriptor, raw)
 
 
-def _make_imap_mock(items: list[tuple], total: int | None = None) -> MagicMock:
-    """IMAP4_SSL インスタンスのモックを組む. select/fetch/logout を擬装する."""
+def _make_imap_mock(
+    items: list[tuple],
+    total: int | None = None,
+    *,
+    spam_items: list[tuple] | None = None,
+    spam_total: int | None = None,
+    list_response: tuple | None = None,
+) -> MagicMock:
+    """IMAP4_SSL インスタンスのモックを組む. select/fetch/list/logout を擬装する.
+
+    INBOX 以外への select は迷惑メールフォルダ扱いとし, spam_items/spam_total
+    （既定は空）を返す. list_response は LIST 応答（\\Junk 検出用. 既定は空で
+    見つからない＝既定名 [Gmail]/Spam にフォールバックする）.
+    """
     imap = MagicMock()
     imap.login.return_value = ("OK", [b"ok"])
     n = total if total is not None else len(items)
-    imap.select.return_value = ("OK", [str(n).encode()])
-    # fetch 応答は [item, item, ...] 形（imaplib 互換のフラットな list）.
-    imap.fetch.return_value = ("OK", list(items))
+    spam_items = spam_items or []
+    spam_n = spam_total if spam_total is not None else len(spam_items)
+
+    state = {"mailbox": "INBOX"}
+
+    def select_side_effect(mailbox, readonly=True):
+        state["mailbox"] = mailbox
+        if mailbox == "INBOX":
+            return ("OK", [str(n).encode()])
+        return ("OK", [str(spam_n).encode()])
+
+    def fetch_side_effect(seq_set, query):
+        if state["mailbox"] == "INBOX":
+            return ("OK", list(items))
+        return ("OK", list(spam_items))
+
+    imap.select.side_effect = select_side_effect
+    imap.fetch.side_effect = fetch_side_effect
+    imap.list.return_value = list_response if list_response is not None else ("OK", [])
     imap.logout.return_value = ("BYE", [b"bye"])
     return imap
 
@@ -90,9 +118,11 @@ def test_list_recent_normalizes_plain() -> None:
     assert "本文の中身" in (m.body_text or "")
     # snippet は空白を畳む（改行が空白に）
     assert m.snippet == "本文の中身 もう一行"
-    # 読み取り専用: PEEK で fetch, readonly select
-    imap.select.assert_called_once()
-    assert imap.select.call_args.kwargs.get("readonly") is True
+    assert m.is_spam is False
+    # 読み取り専用: PEEK で fetch, readonly select（INBOX → 迷惑メールフォルダの順）
+    first_call = imap.select.call_args_list[0]
+    assert first_call.args[0] == "INBOX"
+    assert first_call.kwargs.get("readonly") is True
     fetch_arg = imap.fetch.call_args.args[1]
     assert "BODY.PEEK[]" in fetch_arg
 
@@ -209,3 +239,97 @@ def test_build_source_uses_settings() -> None:
 def test_close_is_noop() -> None:
     src = GmailImapSource("user@gmail.com", "pw")
     assert src.close() is None
+
+
+# ===========================================================================
+# 迷惑メール取得
+# ===========================================================================
+
+def test_spam_folder_discovered_via_junk_attribute_and_marked_is_spam() -> None:
+    """\\Junk 属性で迷惑メールフォルダを検出し, is_spam=True で返す."""
+    inbox_raw = _mime(subject="受信")
+    spam_raw = _mime(subject="迷惑")
+    list_resp = ("OK", [b'(\\HasNoChildren \\Junk) "/" "[Gmail]/Spam"'])
+    imap = _make_imap_mock(
+        [_fetch_item(1, inbox_raw, seen=False)],
+        spam_items=[_fetch_item(2, spam_raw, seen=False)],
+        list_response=list_resp,
+    )
+
+    with patch("app.adapters.sources.gmail_imap.imaplib.IMAP4_SSL", return_value=imap):
+        result = GmailImapSource("user@gmail.com", "pw").list_recent()
+
+    assert len(result) == 2
+    inbox_msg = next(m for m in result if m.subject == "受信")
+    spam_msg = next(m for m in result if m.subject == "迷惑")
+    assert inbox_msg.is_spam is False
+    assert spam_msg.is_spam is True
+    # 迷惑メールフォルダへの select も readonly=True
+    second_call = imap.select.call_args_list[1]
+    assert second_call.args[0] == "[Gmail]/Spam"
+    assert second_call.kwargs.get("readonly") is True
+
+
+def test_spam_folder_falls_back_to_default_name_when_list_fails() -> None:
+    """LIST 失敗時は既定名 [Gmail]/Spam にフォールバックして取得を続ける."""
+    spam_raw = _mime(subject="迷惑")
+    imap = _make_imap_mock(
+        [],
+        total=0,
+        spam_items=[_fetch_item(5, spam_raw, seen=False)],
+    )
+    imap.list.side_effect = Exception("LIST not supported")
+
+    with patch("app.adapters.sources.gmail_imap.imaplib.IMAP4_SSL", return_value=imap):
+        result = GmailImapSource("user@gmail.com", "pw").list_recent()
+
+    assert len(result) == 1
+    assert result[0].is_spam is True
+    second_call = imap.select.call_args_list[1]
+    assert second_call.args[0] == "[Gmail]/Spam"
+
+
+def test_spam_folder_failure_does_not_break_inbox() -> None:
+    """迷惑メールフォルダの SELECT が失敗しても INBOX の結果は返す."""
+    inbox_raw = _mime(subject="受信")
+    imap = _make_imap_mock([_fetch_item(1, inbox_raw, seen=False)])
+
+    original_side_effect = imap.select.side_effect
+
+    def select_fail_spam(mailbox, readonly=True):
+        if mailbox != "INBOX":
+            return ("NO", [b"folder not found"])
+        return original_side_effect(mailbox, readonly=readonly)
+
+    imap.select.side_effect = select_fail_spam
+
+    with patch("app.adapters.sources.gmail_imap.imaplib.IMAP4_SSL", return_value=imap):
+        result = GmailImapSource("user@gmail.com", "pw").list_recent()
+
+    assert len(result) == 1
+    assert result[0].subject == "受信"
+    assert result[0].is_spam is False
+
+
+def test_empty_spam_folder_returns_only_inbox() -> None:
+    """迷惑メールフォルダが空のとき INBOX のみを返す."""
+    raw = _mime(subject="INBOX の 1 件")
+    imap = _make_imap_mock([_fetch_item(10, raw, seen=False)])
+
+    with patch("app.adapters.sources.gmail_imap.imaplib.IMAP4_SSL", return_value=imap):
+        result = GmailImapSource("user@gmail.com", "pw").list_recent()
+
+    assert len(result) == 1
+    assert result[0].is_spam is False
+
+
+def test_list_recent_total_capped_at_limit() -> None:
+    """INBOX + 迷惑メールの合計が limit を超える場合, limit 件に絞る."""
+    inbox_items = [_fetch_item(i, _mime(subject=f"受信{i}"), seen=False) for i in range(1, 4)]
+    spam_items = [_fetch_item(i, _mime(subject=f"迷惑{i}"), seen=False) for i in range(4, 7)]
+    imap = _make_imap_mock(inbox_items, spam_items=spam_items)
+
+    with patch("app.adapters.sources.gmail_imap.imaplib.IMAP4_SSL", return_value=imap):
+        result = GmailImapSource("user@gmail.com", "pw").list_recent(limit=4)
+
+    assert len(result) == 4

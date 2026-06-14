@@ -8,7 +8,8 @@ Repository.upsert で message_id 冪等にして重複を防ぐ）. 増分同期
 将来 fetch_since で足せる（今は必須にしない）.
 """
 
-from typing import Protocol, runtime_checkable
+from dataclasses import dataclass
+from typing import Literal, Protocol, runtime_checkable
 
 from app.models import EmailMessage
 
@@ -23,4 +24,28 @@ class MessageSource(Protocol):
 
     def close(self) -> None:
         """接続を閉じる（接続を持たない実装では no-op で良い）."""
+        ...
+
+
+@dataclass(frozen=True)
+class RemovedMessage:
+    """受信トレイから消えたメッセージ1件と，その種別."""
+
+    raw_id: str                           # 取得元の生 ID（make_id 前．Gmail はメッセージ ID）
+    kind: Literal["archived", "deleted"]  # archived=INBOX から外れた / deleted=削除
+
+
+@runtime_checkable
+class RemovalDetectingSource(Protocol):
+    """受信トレイからの削除/アーカイブ差分を検知できる source（optional 拡張）."""
+
+    def detect_changes(
+        self, start_cursor: str | None
+    ) -> tuple[list[RemovedMessage], str | None]:
+        """前回カーソル以降に INBOX から消えたメッセージと，新しいカーソルを返す.
+
+        - start_cursor=None は初回. 差分は空 list で返し, 現在カーソルだけ確立する.
+        - 戻りカーソルが None の場合, 呼び出し側は保存をスキップする.
+        - 読み取り専用（書き込みは行わない）.
+        """
         ...

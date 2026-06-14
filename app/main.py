@@ -8,17 +8,31 @@ HTTP ステータスへ写像し, 周期取り込みを APScheduler で回す.
 import logging
 from contextlib import asynccontextmanager
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    datefmt="%H:%M:%S",
+)
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.adapters.sources import build_source
 from app.analysis.factory import build_analyzer
-from app.api import routes_emails, routes_messages
+from app.api import (
+    routes_accounts,
+    routes_emails,
+    routes_github_oauth,
+    routes_messages,
+    routes_oauth,
+)
+from app.services.oauth_gmail import OAuthGmailService
+from app.services.oauth_github import OAuthGithubService
 from app.config import get_settings
 from app.notify.factory import build_notifier
 from app.ports.errors import ConflictError, NotFoundError, TransitionError
 from app.repositories import build_repository
+from app.repositories.account_repository import AccountRepository
 from app.scheduler import start_scheduler
 from app.services.ingestion import IngestionService
 from app.services.state_service import StateService
@@ -37,20 +51,71 @@ async def lifespan(app: FastAPI):
         )
 
     repo = build_repository(settings)          # init_db 込み
-    source = build_source(settings)
+    account_repo = AccountRepository()
     analyzer = build_analyzer(settings)
     notifier = build_notifier(settings)
-    ingestion = IngestionService(source, analyzer, repo, notifier, settings)
+    ingestion = IngestionService(account_repo, analyzer, repo, notifier, settings)
     state_service = StateService(repo)
 
     app.state.settings = settings
     app.state.repo = repo
-    app.state.source = source
+    app.state.account_repo = account_repo
     app.state.analyzer = analyzer
     app.state.notifier = notifier
     app.state.ingestion = ingestion
     app.state.state_service = state_service
+    app.state.oauth_service = OAuthGmailService(
+        client_id=settings.gmail_oauth_client_id,
+        client_secret=settings.gmail_oauth_client_secret,
+        redirect_uri=settings.gmail_oauth_redirect_uri,
+    )
+    app.state.github_oauth_service = OAuthGithubService(
+        client_id=settings.github_oauth_client_id,
+        client_secret=settings.github_oauth_client_secret,
+        redirect_uri=settings.github_oauth_redirect_uri,
+    )
     app.state.scheduler = None
+    app.state.feedback_service = None
+
+    # フィードバック学習（OLLAMA_BASE_URL が設定されている場合のみ有効）.
+    if settings.ollama_base_url:
+        try:
+            import chromadb  # noqa: F401 — 導入確認
+            from app.adapters.embedding.ollama_embed import OllamaEmbedding
+            from app.repositories.chroma_repository import ChromaRepository
+            from app.services.feedback_service import FeedbackService as _FeedbackService
+            _embedding = OllamaEmbedding(settings.ollama_base_url, settings.ollama_embed_model)
+            _vector_store = ChromaRepository(settings.chroma_path)
+            app.state.feedback_service = _FeedbackService(repo, _embedding, _vector_store)
+            logger.info("フィードバック学習 有効: embed_model=%s chroma=%s", settings.ollama_embed_model, settings.chroma_path)
+            # LLMAnalyzer にフィードバック検索を注入（stub は無視）.
+            if hasattr(analyzer, "configure_feedback"):
+                analyzer.configure_feedback(
+                    _embedding,
+                    _vector_store,
+                    top_k=settings.feedback_top_k,
+                    distance_threshold=settings.feedback_distance_threshold,
+                )
+                logger.info("フィードバック注入 有効: top_k=%d threshold=%.2f", settings.feedback_top_k, settings.feedback_distance_threshold)
+        except ImportError:
+            logger.warning("chromadb が未インストールです。フィードバック機能を無効化します。")
+        except Exception:
+            logger.exception("フィードバック初期化に失敗（起動は継続）")
+
+    # env 変数にアカウントが設定されていて DB に未登録なら自動登録する.
+    if settings.gmail_address and settings.gmail_app_password:
+        existing_addresses = {a["address"] for a in account_repo.list_for_ingest()}
+        if settings.gmail_address not in existing_addresses:
+            try:
+                account_repo.create(
+                    provider="gmail",
+                    label=settings.gmail_address,
+                    address=settings.gmail_address,
+                    credential=settings.gmail_app_password,
+                )
+                logger.info("env 変数のアカウントを DB に自動登録: %s", settings.gmail_address)
+            except Exception:
+                logger.exception("env 変数のアカウント自動登録に失敗（起動は継続）")
 
     if settings.ingest_on_startup:
         try:
@@ -66,10 +131,6 @@ async def lifespan(app: FastAPI):
     finally:
         if app.state.scheduler is not None:
             app.state.scheduler.shutdown(wait=False)
-        try:
-            source.close()
-        except Exception:
-            logger.exception("source.close に失敗")
 
 
 app = FastAPI(title="ReplyGuard API", version="0.2.0", lifespan=lifespan)
@@ -79,7 +140,7 @@ app = FastAPI(title="ReplyGuard API", version="0.2.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=get_settings().origins_list,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],
 )
 
@@ -115,3 +176,6 @@ def health() -> dict:
 
 app.include_router(routes_emails.router)
 app.include_router(routes_messages.router)
+app.include_router(routes_accounts.router)
+app.include_router(routes_oauth.router)
+app.include_router(routes_github_oauth.router)

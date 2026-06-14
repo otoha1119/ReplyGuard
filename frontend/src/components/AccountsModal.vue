@@ -1,0 +1,737 @@
+<script setup lang="ts">
+import { ref, onMounted } from "vue";
+import type { AccountConfig, AccountConfigCreate } from "../types";
+import { getAccounts, createAccount, deleteAccount, startGmailOAuth, startGithubOAuth } from "../api";
+
+const emit = defineEmits<{
+  "accounts-changed": [];
+  close: [];
+}>();
+
+const accounts = ref<AccountConfig[]>([]);
+const listLoading = ref(false);
+const listError = ref<string | null>(null);
+
+async function loadAccounts(): Promise<void> {
+  listLoading.value = true;
+  listError.value = null;
+  try {
+    accounts.value = await getAccounts();
+  } catch (e) {
+    listError.value = e instanceof Error ? e.message : "取得に失敗しました.";
+  } finally {
+    listLoading.value = false;
+  }
+}
+
+const deletingId = ref<string | null>(null);
+const deleteError = ref<string | null>(null);
+
+async function onDelete(id: string): Promise<void> {
+  deletingId.value = id;
+  deleteError.value = null;
+  try {
+    await deleteAccount(id);
+    await loadAccounts();
+    emit("accounts-changed");
+  } catch (e) {
+    deleteError.value = e instanceof Error ? e.message : "削除に失敗しました.";
+  } finally {
+    deletingId.value = null;
+  }
+}
+
+// Which provider's connect form is expanded
+const expandedProvider = ref<string | null>(null);
+
+function toggleExpand(provider: string): void {
+  expandedProvider.value = expandedProvider.value === provider ? null : provider;
+  // Reset form when switching
+  form.value = { provider, label: "", address: "", credential: "" };
+  formError.value = null;
+  oauthError.value = null;
+  labelEdited.value = false;
+}
+
+// --- Connect form ---
+const form = ref<AccountConfigCreate>({ provider: "gmail", label: "", address: "", credential: "" });
+const formError = ref<string | null>(null);
+const submitting = ref(false);
+const labelEdited = ref(false);
+
+function onAddressInput(): void {
+  if (!labelEdited.value) form.value.label = form.value.address;
+}
+function onLabelInput(): void {
+  labelEdited.value = form.value.label !== form.value.address;
+}
+
+const oauthLoading = ref(false);
+const oauthError = ref<string | null>(null);
+
+async function onGoogleConnect(): Promise<void> {
+  oauthError.value = null;
+  if (!form.value.label.trim()) { oauthError.value = "表示名を入力してください."; return; }
+  oauthLoading.value = true;
+  try {
+    const { auth_url } = await startGmailOAuth(form.value.label, "");
+    window.location.href = auth_url;
+  } catch (e) {
+    oauthError.value = e instanceof Error ? e.message : "OAuth 開始に失敗しました.";
+  } finally {
+    oauthLoading.value = false;
+  }
+}
+
+async function onGithubConnect(): Promise<void> {
+  oauthError.value = null;
+  if (!form.value.label.trim()) {
+    oauthError.value = "表示名を入力してください.";
+    return;
+  }
+  oauthLoading.value = true;
+  try {
+    const { auth_url } = await startGithubOAuth(form.value.label);
+    window.location.href = auth_url;
+  } catch (e) {
+    oauthError.value = e instanceof Error ? e.message : "OAuth 開始に失敗しました.";
+  } finally {
+    oauthLoading.value = false;
+  }
+}
+
+async function onSubmit(provider: string): Promise<void> {
+  formError.value = null;
+  if (!form.value.label.trim()) { formError.value = "表示名を入力してください."; return; }
+  if (!form.value.address.trim()) { formError.value = "アドレスを入力してください."; return; }
+  if (!form.value.credential.trim()) { formError.value = "認証情報を入力してください."; return; }
+  submitting.value = true;
+  try {
+    await createAccount({ ...form.value, provider });
+    form.value = { provider, label: "", address: "", credential: "" };
+    labelEdited.value = false;
+    expandedProvider.value = null;
+    await loadAccounts();
+    emit("accounts-changed");
+  } catch (e) {
+    formError.value = e instanceof Error ? e.message : "追加に失敗しました.";
+  } finally {
+    submitting.value = false;
+  }
+}
+
+function onOverlayClick(e: MouseEvent): void {
+  if ((e.target as HTMLElement).classList.contains("modal-overlay")) emit("close");
+}
+
+// Provider catalogue — fixed list, enriched with connected account if any
+const PROVIDERS = [
+  { id: "gmail",   label: "Gmail",   color: "#049DBF", soon: false, maxAccounts: Infinity },
+  { id: "github",  label: "GitHub",  color: "#049DBF", soon: false, maxAccounts: 1 },
+  { id: "slack",   label: "Slack",   color: "#049DBF", soon: false, maxAccounts: Infinity },
+  { id: "outlook", label: "Outlook", color: "#AEBFBC", soon: true,  maxAccounts: 1 },
+] satisfies { id: string; label: string; color: string; soon: boolean; maxAccounts: number }[];
+
+function connectedAccounts(provider: string): AccountConfig[] {
+  return accounts.value.filter((a) => a.provider.toLowerCase() === provider);
+}
+
+onMounted(() => { void loadAccounts(); });
+</script>
+
+<template>
+  <Transition name="modal-fade">
+    <div class="modal-overlay" role="dialog" aria-modal="true" aria-label="アカウント設定" @click="onOverlayClick">
+    <div class="modal-card glass">
+      <div class="modal-header">
+        <span class="modal-title">アカウント設定</span>
+        <button type="button" class="close-btn" aria-label="閉じる" @click="emit('close')">✕</button>
+      </div>
+
+      <div class="provider-list">
+        <p v-if="listError" class="banner err" role="alert">{{ listError }}</p>
+        <p v-if="deleteError" class="banner err" role="alert">{{ deleteError }}</p>
+        <p v-if="listLoading" class="muted-msg">読み込み中…</p>
+
+        <div
+          v-for="p in PROVIDERS"
+          :key="p.id"
+          class="provider-row"
+          :class="{ expanded: expandedProvider === p.id }"
+        >
+          <!-- Main row -->
+          <div class="provider-main">
+            <!-- Icon -->
+            <div class="provider-icon" :style="{ background: p.color }">
+              <!-- Gmail -->
+              <svg v-if="p.id === 'gmail'" width="18" height="18" viewBox="0 0 24 24" fill="white" aria-hidden="true">
+                <path d="M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zm0 4-8 5-8-5V6l8 5 8-5v2z"/>
+              </svg>
+              <!-- GitHub -->
+              <svg v-else-if="p.id === 'github'" width="18" height="18" viewBox="0 0 24 24" fill="white" aria-hidden="true">
+                <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/>
+              </svg>
+              <!-- Slack -->
+              <svg v-else-if="p.id === 'slack'" width="18" height="18" viewBox="0 0 24 24" fill="white" aria-hidden="true">
+                <path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zM6.313 15.165a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zM8.834 6.313a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zM18.956 8.834a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zM17.688 8.834a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.165 0a2.528 2.528 0 0 1 2.523 2.522v6.312zM15.165 18.956a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.52-2.522v-2.522h2.52zM15.165 17.688a2.527 2.527 0 0 1-2.52-2.523 2.526 2.526 0 0 1 2.52-2.52h6.313A2.527 2.527 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.523h-6.313z"/>
+              </svg>
+              <!-- Outlook -->
+              <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="white" aria-hidden="true">
+                <path d="M24 7.387v10.478L19.2 15l-5.2 3V9l5.2-3 4.8 1.387zM13 8.5V18l-2 1.5V5L2 7v10l9 2v1.5L0 18V6l13-3v5.5z"/>
+              </svg>
+            </div>
+
+            <!-- Name + status -->
+            <div class="provider-info">
+              <span class="provider-name">{{ p.label }}</span>
+              <span v-if="connectedAccounts(p.id).length > 0" class="provider-status connected">
+                {{ connectedAccounts(p.id).length }}件接続済み
+              </span>
+              <span v-else-if="p.soon" class="provider-status soon">近日公開</span>
+              <span v-else class="provider-status disconnected">未接続</span>
+            </div>
+
+            <div style="flex: 1" />
+
+            <!-- Add button: shown unless soon or maxAccounts reached -->
+            <button
+              v-if="!p.soon && connectedAccounts(p.id).length < p.maxAccounts"
+              type="button"
+              class="action-btn connect-btn"
+              :class="{ active: expandedProvider === p.id }"
+              :aria-label="`${p.label} アカウントを追加`"
+              @click="toggleExpand(p.id)"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true">
+                <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
+            </button>
+          </div>
+
+          <!-- Connected accounts list -->
+          <div v-if="connectedAccounts(p.id).length > 0" class="account-list">
+            <div
+              v-for="account in connectedAccounts(p.id)"
+              :key="account.id"
+              class="account-row"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" class="account-check">
+                <path d="M20 6L9 17l-5-5"/>
+              </svg>
+              <span class="account-row-label">{{ account.label }}</span>
+              <button
+                type="button"
+                class="action-btn disconnect-btn"
+                :disabled="deletingId === account.id"
+                :aria-label="`${account.label} を切断`"
+                @click="onDelete(account.id)"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true">
+                  <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Inline connect form -->
+          <Transition name="expand">
+          <div v-if="expandedProvider === p.id" class="connect-form">
+            <p v-if="formError" class="banner err" role="alert">{{ formError }}</p>
+
+            <!-- Gmail: label + OAuth -->
+            <template v-if="p.id === 'gmail'">
+              <div class="field">
+                <label class="label" for="f-label">表示名</label>
+                <input id="f-label" v-model="form.label" type="text" class="input" placeholder="例: 仕事用 Gmail" autocomplete="off" @input="onLabelInput" />
+              </div>
+              <button type="button" class="oauth-btn" :disabled="oauthLoading" @click="onGoogleConnect">
+                {{ oauthLoading ? "接続中..." : "Google アカウントで接続" }}
+              </button>
+              <p v-if="oauthError" class="error-text">{{ oauthError }}</p>
+            </template>
+
+            <!-- GitHub: label + OAuth -->
+            <template v-else-if="p.id === 'github'">
+              <div class="field">
+                <label class="label" for="f-label-github">表示名</label>
+                <input id="f-label-github" v-model="form.label" type="text" class="input" placeholder="例: 仕事用 GitHub" autocomplete="off" @input="onLabelInput" />
+              </div>
+              <button type="button" class="oauth-btn oauth-btn--github" :disabled="oauthLoading" @click="onGithubConnect">
+                {{ oauthLoading ? "接続中..." : "GitHub で接続" }}
+              </button>
+              <p v-if="oauthError" class="error-text">{{ oauthError }}</p>
+            </template>
+
+            <!-- Slack: label + workspace + token -->
+            <template v-else-if="p.id === 'slack'">
+              <div class="field">
+                <label class="label" for="f-label-slack">表示名</label>
+                <input id="f-label-slack" v-model="form.label" type="text" class="input" placeholder="例: 会社の Slack" autocomplete="off" @input="onLabelInput" />
+              </div>
+              <div class="field">
+                <label class="label" for="f-address">ワークスペース名</label>
+                <input id="f-address" v-model="form.address" type="text" class="input" placeholder="例: my-team" autocomplete="off" @input="onAddressInput" />
+              </div>
+              <div class="field">
+                <label class="label" for="f-cred">Bot User OAuth Token</label>
+                <input id="f-cred" v-model="form.credential" type="password" class="input" placeholder="xoxb-..." autocomplete="new-password" />
+              </div>
+              <div class="form-footer">
+                <button type="button" class="btn-primary" :disabled="submitting" @click="onSubmit('slack')">
+                  {{ submitting ? "追加中…" : "接続する" }}
+                </button>
+              </div>
+            </template>
+          </div>
+          </Transition>
+        </div>
+      </div>
+    </div>
+  </div>
+  </Transition>
+</template>
+
+<style scoped>
+/*
+ * AccountsModal — Apple Liquid Glass 化
+ * .glass / .glass--ocean / トークンは styles.css グローバル定義を参照
+ * 5色（mist/ocean/sage/leaf/sand）＋白のみ．html.dark・ブランド色禁止
+ */
+
+/* ── オーバーレイ: ocean 由来の淡い暗幕 + blur ── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 157, 191, 0.18);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+/*
+ * .modal-card に .glass を付与（テンプレート側で class="modal-card glass"）
+ * .glass のデフォルト border-radius は --radius(24px)→ここで --radius-lg(30px) に上書き
+ * overflow-y はスクロール制御のため維持
+ */
+.modal-card {
+  border-radius: var(--radius-lg) !important;
+  width: 440px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  /* .glass の shadow を elev-3 相当に強化（モーダル深度） */
+  box-shadow:
+    var(--glass-highlight),
+    var(--glass-hairline),
+    0 24px 64px rgba(4, 157, 191, 0.20),
+    0 6px 16px rgba(4, 157, 191, 0.10) !important;
+  animation: pop-in-modal var(--dur-base) var(--ease-spring) both;
+}
+
+/* ── ヘッダー: .glass--ocean（濃ガラス＋白タイトル） ── */
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  /* glass--ocean 値を直展開（scoped から .glass--ocean グローバルに依存しない） */
+  background: var(--glass-ocean-bg);
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.35),
+    inset 0 0 20px rgba(255, 255, 255, 0.10),
+    0 0 0 1px rgba(255, 255, 255, 0.18),
+    var(--glass-shadow);
+  color: var(--white);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+}
+.modal-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--white);
+}
+.close-btn {
+  background: none;
+  border: none;
+  font-size: 16px;
+  color: rgba(255, 255, 255, 0.75);
+  padding: 4px 6px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: var(--radius-pill);
+  transition:
+    color var(--dur-fast) var(--ease-standard),
+    background var(--dur-fast) var(--ease-standard),
+    transform var(--dur-fast) var(--ease-spring);
+}
+.close-btn:hover {
+  color: var(--white);
+  background: rgba(255, 255, 255, 0.18);
+  transform: scale(1.15);
+}
+.close-btn:active {
+  transform: scale(0.9);
+  transition-duration: 80ms;
+}
+
+/* ── Provider list ── */
+.provider-list {
+  padding: 12px 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/*
+ * .provider-row は白〜mist 地 + sage 枠 + 角丸
+ * expanded 時は ocean 枠へ切り替え
+ */
+.provider-row {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.72);
+  transition:
+    border-color var(--dur-fast) var(--ease-standard),
+    box-shadow var(--dur-fast) var(--ease-standard),
+    transform var(--dur-fast) var(--ease-out-expo);
+}
+.provider-row:hover:not(.expanded) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(4, 157, 191, 0.10);
+}
+.provider-row.expanded {
+  border-color: var(--ocean);
+  box-shadow: 0 0 0 2px var(--ocean-12);
+}
+
+.provider-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: transparent;
+}
+
+/* プロバイダアイコン: ocean 塗り（sage の場合はそのまま残す） */
+.provider-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.provider-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.provider-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ocean);
+}
+.provider-status {
+  font-size: 11px;
+  font-weight: 600;
+}
+/* connected: leaf ドット + ocean 文字 */
+.provider-status.connected {
+  color: var(--ocean);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.provider-status.connected::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--leaf);
+  flex-shrink: 0;
+}
+/* 未接続・近日公開: ocean 62% */
+.provider-status.disconnected { color: var(--ocean); }
+.provider-status.soon { color: var(--sage); }
+
+/* ── Connected accounts list ── */
+.account-list {
+  border-top: 1px solid var(--border);
+  background: rgba(228, 235, 242, 0.55); /* mist 半透明 */
+  display: flex;
+  flex-direction: column;
+}
+
+.account-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.account-row:last-child {
+  border-bottom: none;
+}
+
+/* チェックアイコン: leaf 可 */
+.account-check {
+  color: var(--leaf);
+  flex-shrink: 0;
+}
+
+.account-row-label {
+  flex: 1;
+  font-size: 13px;
+  color: var(--ocean);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── アクションボタン（+ / ×） ── */
+.action-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    background var(--dur-fast) var(--ease-standard),
+    border-color var(--dur-fast) var(--ease-standard),
+    color var(--dur-fast) var(--ease-standard),
+    transform var(--dur-fast) var(--ease-spring);
+}
+.action-btn:hover {
+  transform: scale(1.15);
+}
+.action-btn:active {
+  transform: scale(0.9);
+  transition-duration: 80ms;
+}
+/* + ボタン: ocean 枠 + ocean 文字 → hover/active で ocean 塗り＋白 */
+.connect-btn {
+  border: 1px solid var(--ocean);
+  background: rgba(255, 255, 255, 0.55);
+  color: var(--ocean);
+}
+.connect-btn:hover,
+.connect-btn.active {
+  background: var(--ocean);
+  color: var(--white);
+}
+/* 切断(×)ボタン: sage 色 → hover で ocean（赤なし） */
+.disconnect-btn {
+  border: none;
+  background: none;
+  color: var(--ocean);
+}
+.disconnect-btn:hover:not(:disabled) {
+  color: var(--ocean);
+  background: var(--ocean-12);
+}
+.disconnect-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ── インライン接続フォーム ── */
+.connect-form {
+  padding: 14px 14px 16px;
+  border-top: 1px solid var(--border);
+  background: rgba(228, 235, 242, 0.40);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ocean);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+/* 入力: 白〜mist 地 + sage 枠 + ocean 文字 */
+.input {
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--sage);
+  background: rgba(255, 255, 255, 0.75);
+  color: var(--ocean);
+  outline: none;
+  box-shadow: 0 0 0 0px var(--ocean-12);
+  transition:
+    border-color var(--dur-fast) var(--ease-standard),
+    box-shadow var(--dur-base) var(--ease-out-expo);
+}
+.input:focus {
+  border-color: var(--ocean);
+  box-shadow: 0 0 0 3px var(--ocean-12);
+}
+
+.form-footer {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* 主要ボタン（接続する）: ocean 塗り + 白 + pill + .lift 相当の hover */
+.btn-primary {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 18px;
+  border-radius: var(--radius-pill);
+  border: none;
+  background: var(--ocean);
+  color: var(--white);
+  cursor: pointer;
+  box-shadow: var(--glass-shadow);
+  transition:
+    background var(--dur-fast) var(--ease-standard),
+    transform var(--dur-fast) var(--ease-spring),
+    box-shadow var(--dur-fast) var(--ease-standard);
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--ocean-72);
+  transform: translateY(-1px) scale(1.03);
+  box-shadow: var(--glass-shadow-hover);
+}
+.btn-primary:active:not(:disabled) {
+  transform: scale(0.94);
+  transition-duration: 80ms;
+}
+.btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* OAuth ボタン: ocean 塗り + 白 + pill + .lift（全幅） */
+.oauth-btn {
+  width: 100%;
+  padding: 9px;
+  background: var(--ocean);
+  color: var(--white);
+  border: none;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: var(--glass-shadow);
+  transition:
+    background var(--dur-fast) var(--ease-standard),
+    transform var(--dur-fast) var(--ease-spring),
+    box-shadow var(--dur-fast) var(--ease-standard);
+}
+.oauth-btn:hover:not(:disabled) {
+  background: var(--ocean-72);
+  transform: translateY(-1px) scale(1.03);
+  box-shadow: var(--glass-shadow-hover);
+}
+.oauth-btn:active:not(:disabled) {
+  transform: scale(0.94);
+  transition-duration: 80ms;
+}
+.oauth-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* .oauth-btn--github は .oauth-btn の ocean で網羅（ブランド色廃止・5色統一） */
+
+/* エラーバナー: 白地（ガラス）+ ocean 太枠 + ocean 文字（赤なし・danger=ocean） */
+.banner {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+.banner.err {
+  color: var(--ocean);
+  background: rgba(255, 255, 255, 0.85);
+  border: 2px solid var(--ocean);
+  font-weight: 600;
+}
+.error-text {
+  font-size: 12px;
+  color: var(--ocean);
+  margin: 0;
+  font-weight: 600;
+}
+.muted-msg {
+  font-size: 13px;
+  color: var(--ocean);
+  padding: 8px 0;
+  margin: 0;
+}
+
+/* ── <Transition name="modal-fade"> ── */
+/*
+ * オーバーレイ: opacity のみ（レイアウト変更なし）
+ * 入場: out-expo で滑らか・退場: standard で自然に消える
+ * カード自体は pop-in @keyframes（scale + opacity）で入場
+ */
+.modal-fade-enter-active {
+  transition: opacity var(--dur-base) var(--ease-out-expo);
+}
+.modal-fade-leave-active {
+  transition: opacity var(--dur-base) var(--ease-standard);
+}
+.modal-fade-enter-from,
+.modal-fade-leave-to {
+  opacity: 0;
+}
+
+/* pop-in を spring + out-expo ブレンドに変更（scale + translateY） */
+@keyframes pop-in-modal {
+  from {
+    opacity: 0;
+    transform: scale(0.90) translateY(12px);
+  }
+  60% {
+    opacity: 1;
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* ── <Transition name="expand"> アコーディオン展開 ── */
+/*
+ * height ではなく opacity + translateY で実装（レイアウトプロパティ禁止）
+ * 展開：spring で少し弾む，折りたたみ：out-expo で素直に消える
+ */
+.expand-enter-active {
+  transition:
+    opacity var(--dur-base) var(--ease-spring),
+    transform var(--dur-base) var(--ease-spring);
+}
+.expand-leave-active {
+  transition:
+    opacity var(--dur-fast) var(--ease-standard),
+    transform var(--dur-fast) var(--ease-standard);
+}
+.expand-enter-from {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+.expand-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+</style>

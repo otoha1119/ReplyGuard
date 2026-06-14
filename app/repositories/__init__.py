@@ -8,6 +8,7 @@ Repository ポートだけに依存し, SQLAlchemy の詳細を知らない.
 from app.config import Settings
 from app.ports.repository import Repository
 from app.repositories.db import configure_engine, init_db
+from app.repositories.migrations import run_migrations
 from app.repositories.sql_repository import SqlRepository
 
 __all__ = ["build_repository", "SqlRepository"]
@@ -17,4 +18,5 @@ def build_repository(settings: Settings) -> Repository:
     """settings.database_url で engine を構築・初期化し Repository を返す."""
     configure_engine(settings.database_url)
     init_db()
+    run_migrations(settings.database_url)
     return SqlRepository()

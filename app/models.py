@@ -12,7 +12,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class EmailMessage(BaseModel):
@@ -27,6 +27,25 @@ class EmailMessage(BaseModel):
     snippet: str = ""             # 本文先頭のプレビュー
     is_unread: bool = False
     body_text: str | None = None  # LLM 入力用の本文(先頭のみ・任意追加フィールド)
+    is_spam: bool = False          # 取得元プロバイダが迷惑メールに分類していたか(任意追加フィールド)
+    email_category: str | None = None  # Gmail カテゴリ: "primary"/"promotion"/"social"/"update"/"forum"(任意追加フィールド)
+
+
+# 対応区分（LLM が抽出するファクト）.
+# reply_required   : 返信が必要
+# task_required    : 返信以外の作業・タスクが必要
+# review_required  : 内容の確認・レビューが必要
+# approval_required: 承認・決裁が必要
+# waiting_other    : 他者対応待ち・自分のアクションは不要
+# info_only        : 情報共有のみ・対応不要
+RequestType = Literal[
+    "reply_required",
+    "task_required",
+    "review_required",
+    "approval_required",
+    "waiting_other",
+    "info_only",
+]
 
 
 class AnalysisResult(BaseModel):
@@ -34,10 +53,11 @@ class AnalysisResult(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    importance: int = Field(ge=1, le=5)                       # 重要度 1-5
-    needs_reply: bool = False                                 # 対応要否
+    importance: int = Field(ge=1, le=6)                       # 重要度 1-6
     task_weight: Literal["light", "medium", "heavy"] = "light"
-    category: str = "fyi"                                     # 分類ラベル
+    request_type: RequestType = "info_only"                   # 対応区分
+    is_promotional: bool = False                              # 宣伝・広告・メルマガ等か
+    is_security_notification: bool = False                    # セキュリティ通知か（ログイン・パスワード・2FA等）
     summary: str = ""                                         # 要約
     suggested_action: str | None = None
     deadline: datetime | None = None
@@ -63,6 +83,9 @@ class MessageRecord(BaseModel):
     analysis: AnalysisResult | None = None
     state: MessageState = MessageState.UNHANDLED
     triage_score: float = 0.0     # 未対応検知スコア(未読×重要度×経過時間)
+    urgency_score: float = 0.0    # 期限緊急度スコア(deadline 近接度)
+    account_address: str = ""     # 受信アカウントのメールアドレス
+    is_archived: bool = False     # メインフィードから隠す可視性フラグ（状態とは独立）
     version: int = 0              # 楽観ロック用
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -70,3 +93,62 @@ class MessageRecord(BaseModel):
     @staticmethod
     def make_id(provider: str, raw_id: str) -> str:
         return f"{provider}:{raw_id}"
+
+
+class FeedbackCorrection(BaseModel):
+    """ユーザーが修正した分析結果（フィードバック入力）.
+
+    現在の予測値をベースにユーザーが変更した値を受け取る.
+    reason はユーザーの修正メモ（LLMプロンプトに注入するため300文字以内）.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    importance: int = Field(ge=1, le=6)
+    request_type: RequestType
+    is_promotional: bool = False
+    is_security_notification: bool = False
+    reason: str = Field(default="", max_length=300)
+
+
+_SUPPORTED_PROVIDERS = {"gmail", "slack", "github"}
+
+
+class AccountConfig(BaseModel):
+    """アカウント設定（レスポンス用: 認証情報を含まない）."""
+
+    id: str
+    provider: str
+    label: str
+    address: str = ""
+    created_at: datetime | None = None
+
+
+class AccountConfigCreate(BaseModel):
+    """アカウント追加リクエスト. credential はレスポンスには返さない."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str
+    label: str
+    address: str
+    credential: str  # アプリパスワード等（保存後は API から取得不可）
+
+    @field_validator("provider")
+    @classmethod
+    def _validate_provider(cls, v: str) -> str:
+        if v not in _SUPPORTED_PROVIDERS:
+            raise ValueError(f"未対応のプロバイダ: {v}（対応: {_SUPPORTED_PROVIDERS}）")
+        return v
+
+    @field_validator("address")
+    @classmethod
+    def _strip_address(cls, v: str) -> str:
+        return v.strip()
+
+    @field_validator("credential")
+    @classmethod
+    def _normalize_credential(cls, v: str) -> str:
+        # Google のアプリパスワードは「xxxx xxxx xxxx xxxx」形式で表示されるため
+        # コピペでスペースが混入しやすい. 全スペースを除去して正規化する.
+        return v.replace(" ", "").strip()
