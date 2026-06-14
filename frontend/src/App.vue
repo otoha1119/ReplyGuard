@@ -102,19 +102,38 @@ watch(unhandledCount, (n) => {
   updateFavicon(n);
 }, { immediate: true });
 
+// 期限の「日付」はユーザーのローカルタイムゾーンで判定する.
+// バックエンドは時刻を UTC で返すため, ISO 文字列の先頭10文字を切り出すと
+// JST など UTC+ の地域では日付が1日前にずれ,「本日中」の期限が誤って
+// 期限切れと判定される. Date でパースしローカル日付へ正規化して比較する.
+function toLocalDateStr(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+function deadlineLocalDate(deadline: string | null | undefined): string | null {
+  if (!deadline) return null;
+  const d = new Date(deadline);
+  return Number.isNaN(d.getTime()) ? deadline.slice(0, 10) : toLocalDateStr(d);
+}
+function localToday(): string {
+  return toLocalDateStr(new Date());
+}
+
 const inboxStats = computed(() => {
   const list = inboxRecords.value;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localToday();
   return {
     total:       list.length,
     unhandled:   list.filter(r => r.state === "unhandled").length,
     in_progress: list.filter(r => r.state === "in_progress").length,
     snoozed:     list.filter(r => r.state === "snoozed").length,
     needsReply:  list.filter(r => r.analysis?.request_type === "reply_required").length,
-    today:       list.filter(r => r.analysis?.deadline?.slice(0, 10) === today).length,
+    today:       list.filter(r => deadlineLocalDate(r.analysis?.deadline) === today).length,
     overdue:     list.filter(r => {
-      const d = r.analysis?.deadline?.slice(0, 10);
-      return d !== undefined && d !== null && d < today;
+      const d = deadlineLocalDate(r.analysis?.deadline);
+      return d !== null && d < today;
     }).length,
   };
 });
@@ -239,13 +258,13 @@ const displayedRecords = computed(() => {
   if (timeChip.value === "needs_reply") {
     list = list.filter((r) => r.analysis?.request_type === "reply_required");
   } else if (timeChip.value === "today") {
-    const today = new Date().toISOString().slice(0, 10);
-    list = list.filter((r) => r.analysis?.deadline?.slice(0, 10) === today);
+    const today = localToday();
+    list = list.filter((r) => deadlineLocalDate(r.analysis?.deadline) === today);
   } else if (timeChip.value === "overdue") {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localToday();
     list = list.filter((r) => {
-      const d = r.analysis?.deadline?.slice(0, 10);
-      return d !== undefined && d !== null && d < today;
+      const d = deadlineLocalDate(r.analysis?.deadline);
+      return d !== null && d < today;
     });
   }
   // Client-side sort

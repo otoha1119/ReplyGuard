@@ -124,8 +124,6 @@ const receivedAtFull = computed(() => {
   return d.toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 });
 
-const triage = computed(() => props.record.triage_score.toFixed(1));
-
 const isArchive = computed(() => props.mode === "archive");
 
 const expanded = ref(false);
@@ -339,16 +337,6 @@ const REQUEST_TYPES: { value: RequestType; label: string }[] = [
           :title="`判定した分析器: ${analyzerLabel}`"
           >🤖 {{ analyzerLabel }}</span
         >
-        <span class="tag tag--triage triage-tip">
-          ▲ {{ triage }}
-          <span class="triage-tooltip" role="tooltip">
-            <span class="triage-row">重要度 {{ importance }} / 6</span>
-            <span v-if="analysis?.request_type === 'reply_required'" class="triage-row">要返信</span>
-            <span v-if="analysis?.deadline" class="triage-row">期限：{{ analysis.deadline.slice(0, 10) }}</span>
-            <span v-if="weightLabel" class="triage-row">タスク負荷：{{ weightLabel }}</span>
-            <span v-if="analyzerLabel" class="triage-row">判定：{{ analyzerLabel }}</span>
-          </span>
-        </span>
       </div>
     </div>
 
@@ -873,51 +861,6 @@ const REQUEST_TYPES: { value: RequestType; label: string }[] = [
   border-color: var(--red);
   background: var(--red-12);
   font-weight: 600;
-}
-
-/* triage スコア */
-.tag--triage {
-  color: var(--text-muted);
-}
-
-/* triage ツールチップ: 濃ガラス（ocean地＋白文字） */
-.triage-tip {
-  position: relative;
-  cursor: default;
-}
-.triage-tooltip {
-  display: none;
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--ocean);
-  color: var(--white);
-  border-radius: var(--radius-sm);
-  padding: 7px 10px;
-  font-size: 11px;
-  white-space: nowrap;
-  z-index: 200;
-  flex-direction: column;
-  gap: 3px;
-  box-shadow: var(--glass-shadow-hover);
-  pointer-events: none;
-}
-.triage-tooltip::after {
-  content: '';
-  position: absolute;
-  top: 100%;
-  left: 50%;
-  transform: translateX(-50%);
-  border: 5px solid transparent;
-  border-top-color: var(--ocean);
-}
-.triage-tip:hover .triage-tooltip {
-  display: flex;
-}
-.triage-row {
-  display: block;
-  line-height: 1.5;
 }
 
 .expand-icon {
